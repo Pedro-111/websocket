@@ -11,7 +11,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 # Configuración de logging
-logging.basicConfig(filename='proxy.log', level=logging.INFO, 
+logging.basicConfig(filename='/tmp/proxy.log', level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Configuración de conexión
