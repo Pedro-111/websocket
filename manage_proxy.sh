@@ -136,13 +136,14 @@ view_open_ports() {
     printf "%-10s %-20s\n" "Puerto" "Estado"
     echo "------------------------"
     
-    current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | awk '{print $NF}')
+    current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | awk '{print $NF}' | tr -d '}' | tr -d '{')
     status=$(systemctl is-active $SERVICE_NAME)
     
     for port in $current_ports; do
         printf "%-10s %-20s\n" "$port" "$status"
     done
 }
+
 
 view_logs() {
     LOG_FILE="/tmp/proxy.log"
