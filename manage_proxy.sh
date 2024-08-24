@@ -13,14 +13,14 @@ download_proxy_script() {
 }
 
 create_service() {
-    local port=$1
+    local ports=$1
     cat << EOF | sudo tee "$SERVICE_FILE" > /dev/null
 [Unit]
 Description=WebSocket Proxy Service
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 $PROXY_PATH $port
+ExecStart=/usr/bin/python3 $PROXY_PATH $ports
 Restart=on-failure
 User=nobody
 Group=nogroup
@@ -35,27 +35,52 @@ EOF
 }
 
 open_port() {
-    read -p "Ingrese el puerto para el WebSocket: " port
-    download_proxy_script
+    read -p "Ingrese los puertos para el WebSocket (separados por espacios): " new_ports
+    
     if [ -f "$SERVICE_FILE" ]; then
-        sudo sed -i "s|ExecStart=.*|ExecStart=/usr/bin/python3 $PROXY_PATH $port|" "$SERVICE_FILE"
+        # Si el servicio ya existe, añadimos los nuevos puertos
+        current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | awk '{print $NF}')
+        all_ports="$current_ports $new_ports"
+        sudo sed -i "s|ExecStart=.*|ExecStart=/usr/bin/python3 $PROXY_PATH $all_ports|" "$SERVICE_FILE"
         sudo systemctl daemon-reload
         sudo systemctl restart $SERVICE_NAME
     else
-        create_service $port
+        # Si el servicio no existe, lo creamos con los nuevos puertos
+        create_service "$new_ports"
     fi
-    echo "Puerto WebSocket $port abierto y servicio iniciado."
+    
+    echo "Puertos WebSocket $new_ports abiertos y servicio iniciado/actualizado."
 }
 
 close_port() {
-    if [ -f "$SERVICE_FILE" ]; then
+    if [ ! -f "$SERVICE_FILE" ]; then
+        echo "El servicio WebSocket no está instalado."
+        return
+    fi
+
+    current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | awk '{print $NF}')
+    read -p "Ingrese el puerto a cerrar (o 'all' para cerrar todos): " port
+
+    if [ "$port" == "all" ]; then
         sudo systemctl stop $SERVICE_NAME
         sudo systemctl disable $SERVICE_NAME
         sudo rm "$SERVICE_FILE"
         sudo systemctl daemon-reload
-        echo "Servicio WebSocket detenido y deshabilitado."
+        echo "Servicio WebSocket detenido y deshabilitado. Todos los puertos cerrados."
     else
-        echo "El servicio WebSocket no está instalado."
+        new_ports=$(echo $current_ports | sed "s/$port//g" | tr -s ' ')
+        if [ -z "$new_ports" ]; then
+            sudo systemctl stop $SERVICE_NAME
+            sudo systemctl disable $SERVICE_NAME
+            sudo rm "$SERVICE_FILE"
+            sudo systemctl daemon-reload
+            echo "Último puerto cerrado. Servicio WebSocket detenido y deshabilitado."
+        else
+            sudo sed -i "s|ExecStart=.*|ExecStart=/usr/bin/python3 $PROXY_PATH $new_ports|" "$SERVICE_FILE"
+            sudo systemctl daemon-reload
+            sudo systemctl restart $SERVICE_NAME
+            echo "Puerto $port cerrado. Servicio actualizado con los puertos restantes."
+        fi
     fi
 }
 
@@ -101,15 +126,21 @@ remove_script() {
 }
 
 view_open_ports() {
+    if [ ! -f "$SERVICE_FILE" ]; then
+        echo "El servicio WebSocket no está instalado."
+        return
+    fi
+
     echo "Puertos WebSocket abiertos:"
     echo "------------------------"
-    printf "%-10s %-20s %-10s\n" "Puerto" "Estado" "PID"
+    printf "%-10s %-20s\n" "Puerto" "Estado"
     echo "------------------------"
-    sudo ss -tlnp | grep python3 | while read -r line; do
-        port=$(echo $line | awk '{print $4}' | cut -d':' -f2)
-        pid=$(echo $line | awk '{print $6}' | cut -d',' -f2 | cut -d'=' -f2)
-        state="Activo"
-        printf "%-10s %-20s %-10s\n" "$port" "$state" "$pid"
+    
+    current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | awk '{print $NF}')
+    status=$(systemctl is-active $SERVICE_NAME)
+    
+    for port in $current_ports; do
+        printf "%-10s %-20s\n" "$port" "$status"
     done
 }
 
