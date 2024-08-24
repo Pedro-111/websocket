@@ -31,8 +31,9 @@ EOF
 
     sudo systemctl daemon-reload
     sudo systemctl enable $SERVICE_NAME
-    sudo systemctl start $SERVICE_NAME
+    sudo systemctl restart $SERVICE_NAME
 }
+
 open_port() {
     read -p "Ingrese los puertos para el WebSocket (separados por espacios): " new_ports
     
@@ -136,17 +137,23 @@ view_open_ports() {
     echo "------------------------"
     
     # Obtener los puertos desde el archivo de servicio
-    current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | awk '{print substr($0, index($0,$NF))}')
+    current_ports=$(sudo systemctl cat $SERVICE_NAME | grep ExecStart | awk '{for(i=NF-1;i<=NF;i++) print $i}')
     
-    # Mostrar los puertos y su estado real
+    # Obtener el estado del servicio
+    service_status=$(systemctl is-active $SERVICE_NAME)
+    
+    # Mostrar los puertos y su estado
     for port in $current_ports; do
-        if netstat -tuln | grep -q ":$port "; then
+        if [ "$service_status" = "active" ] && netstat -tuln | grep -q ":$port "; then
             status="Activo"
         else
             status="Inactivo"
         fi
         printf "%-10s %-20s\n" "$port" "$status"
     done
+    
+    echo "------------------------"
+    echo "Estado del servicio: $service_status"
 }
 
 view_logs() {
