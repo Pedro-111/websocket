@@ -1,5 +1,6 @@
 🌐 WebSocket Proxy Manager
 Bienvenido al WebSocket Proxy Manager, un script en Bash que te permite gestionar fácilmente un proxy WebSocket. Con este script, puedes abrir y cerrar puertos, actualizar el proxy, eliminarlo y ver los logs de las conexiones, todo con unos simples comandos.
+
 🚀 Características
 - Abrir puerto WebSocket: Configura un puerto para el proxy WebSocket y habilita el servicio.
 - Cerrar puerto WebSocket: Detén y desactiva el servicio del proxy.
