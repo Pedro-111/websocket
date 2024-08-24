@@ -39,7 +39,7 @@ open_port() {
     
     if [ -f "$SERVICE_FILE" ]; then
         # Si el servicio ya existe, añadimos los nuevos puertos
-        current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | awk '{print $NF}')
+        current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | awk '{print substr($0, index($0,$3))}')
         all_ports="$current_ports $new_ports"
         sudo sed -i "s|ExecStart=.*|ExecStart=/usr/bin/python3 $PROXY_PATH $all_ports|" "$SERVICE_FILE"
         sudo systemctl daemon-reload
