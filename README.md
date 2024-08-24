@@ -7,6 +7,7 @@ Bienvenido al WebSocket Proxy Manager, un script en Bash que te permite gestiona
 - Eliminar script: Borra el script proxy.py y desinstala el servicio.
 - Ver puertos abiertos: Muestra una lista de los puertos WebSocket actualmente activos.
 - Ver logs de conexiones: Accede rápidamente a los últimos registros de conexiones.
+
 🛠️ Requisitos
 Sistema Operativo: Linux (Probado en distribuciones basadas en Debian)
 Python: Asegúrate de tener Python 3 instalado en tu sistema.
@@ -30,6 +31,7 @@ proxy-manager
 ```
 
 Sigue las instrucciones en pantalla para gestionar el proxy WebSocket.
+
 📚 Cómo Usar
 Una vez que el gestor está en marcha, verás un menú con opciones:
 
@@ -40,10 +42,13 @@ Una vez que el gestor está en marcha, verás un menú con opciones:
 5. Ver puertos abiertos: Muestra los puertos WebSocket actualmente activos.
 6. Ver logs de conexiones: Revisa las últimas 20 líneas de los registros de conexiones.
 7. Salir: Cierra el gestor.
+
 👨‍💻 Contribuciones
 Las contribuciones son bienvenidas. Si tienes mejoras, errores que corregir o nuevas características, no dudes en hacer un fork del repositorio y enviar un pull request.
+
 📝 Licencia
 Este proyecto está licenciado bajo la Licencia Pública General de GNU versión 3.0. Consulta el archivo LICENSE para más detalles.
+
 ---
 
 ¡Gracias por usar WebSocket Proxy Manager! Si tienes alguna pregunta o comentario, no dudes en abrir un issue en el repositorio. 🚀
