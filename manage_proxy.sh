@@ -60,12 +60,33 @@ close_port() {
 }
 
 update_script() {
-    download_proxy_script
+    # Actualizar proxy.py
+    echo "Actualizando proxy.py..."
+    sudo wget -O "$PROXY_PATH" "https://raw.githubusercontent.com/Pedro-111/websocket/master/proxy.py"
+    sudo chmod +x "$PROXY_PATH"
+    echo "proxy.py actualizado."
+
+    # Actualizar manage_proxy.sh
+    echo "Actualizando manage_proxy.sh..."
+    TEMP_SCRIPT="/tmp/manage_proxy_temp.sh"
+    wget -O "$TEMP_SCRIPT" "https://raw.githubusercontent.com/Pedro-111/websocket/master/manage_proxy.sh"
+    
+    if [ -f "$TEMP_SCRIPT" ]; then
+        sudo mv "$TEMP_SCRIPT" "$0"
+        sudo chmod +x "$0"
+        echo "manage_proxy.sh actualizado."
+        echo "Por favor, reinicie el script para aplicar los cambios."
+        exit 0
+    else
+        echo "Error al actualizar manage_proxy.sh."
+    fi
+
+    # Reiniciar el servicio si está activo
     if systemctl is-active --quiet $SERVICE_NAME; then
         sudo systemctl restart $SERVICE_NAME
-        echo "Servicio reiniciado con la nueva versión del script."
+        echo "Servicio reiniciado con la nueva versión de los scripts."
     else
-        echo "Script actualizado. El servicio no estaba en ejecución."
+        echo "Scripts actualizados. El servicio no estaba en ejecución."
     fi
 }
 
