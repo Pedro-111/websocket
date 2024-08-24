@@ -38,18 +38,32 @@ open_port() {
     read -p "Ingrese los puertos para el WebSocket (separados por espacios): " new_ports
     
     if [ -f "$SERVICE_FILE" ]; then
-        # Si el servicio ya existe, añadimos los nuevos puertos
-        current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | awk '{print substr($0, index($0,$3))}')
-        all_ports="$current_ports $new_ports"
+        # Si el servicio ya existe, obtenemos los puertos actuales
+        current_ports=$(sudo grep ExecStart "$SERVICE_FILE" | awk '{for(i=NF;i>0;i--) if($i ~ /^[0-9]+$/) print $i}')
+        
+        # Combinamos los puertos actuales con los nuevos, eliminando duplicados
+        all_ports=$(echo "$current_ports $new_ports" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+        
+        # Verificamos si hay puertos nuevos para agregar
+        if [ "$all_ports" = "$current_ports" ]; then
+            echo "No se han añadido nuevos puertos. Los puertos solicitados ya están en uso."
+            return
+        fi
+        
+        # Actualizamos el archivo de servicio con todos los puertos
         sudo sed -i "s|ExecStart=.*|ExecStart=/usr/bin/python3 $PROXY_PATH $all_ports|" "$SERVICE_FILE"
-        sudo systemctl daemon-reload
-        sudo systemctl restart $SERVICE_NAME
     else
         # Si el servicio no existe, lo creamos con los nuevos puertos
         create_service "$new_ports"
     fi
     
-    echo "Puertos WebSocket $new_ports abiertos y servicio iniciado/actualizado."
+    sudo systemctl daemon-reload
+    if sudo systemctl restart $SERVICE_NAME; then
+        echo "Puertos WebSocket actualizados. Servicio reiniciado con los siguientes puertos: $all_ports"
+    else
+        echo "Error al reiniciar el servicio. Verifique los logs del sistema."
+        sudo systemctl status $SERVICE_NAME
+    fi
 }
 
 close_port() {
@@ -129,7 +143,7 @@ view_open_ports() {
     if [ ! -f "$SERVICE_FILE" ]; then
         echo "El servicio WebSocket no está instalado."
         return
-    fi
+    }
 
     echo "Puertos WebSocket configurados:"
     echo "------------------------"
@@ -137,25 +151,27 @@ view_open_ports() {
     echo "------------------------"
     
     # Obtener los puertos desde el archivo de servicio
-    current_ports=$(sudo systemctl cat $SERVICE_NAME | grep ExecStart | awk '{for(i=NF-1;i<=NF;i++) print $i}')
+    current_ports=$(sudo grep ExecStart "$SERVICE_FILE" | awk '{for(i=NF;i>0;i--) if($i ~ /^[0-9]+$/) print $i}')
     
     # Obtener el estado del servicio
     service_status=$(systemctl is-active $SERVICE_NAME)
     
-    # Mostrar los puertos y su estado
-    for port in $current_ports; do
-        if [ "$service_status" = "active" ] && netstat -tuln | grep -q ":$port "; then
-            status="Activo"
-        else
-            status="Inactivo"
-        fi
-        printf "%-10s %-20s\n" "$port" "$status"
-    done
+    if [ -z "$current_ports" ]; then
+        echo "No se encontraron puertos configurados."
+    else
+        for port in $current_ports; do
+            if [ "$service_status" = "active" ] && sudo netstat -tuln | grep -q ":$port "; then
+                status="Activo"
+            else
+                status="Inactivo"
+            fi
+            printf "%-10s %-20s\n" "$port" "$status"
+        done
+    fi
     
     echo "------------------------"
     echo "Estado del servicio: $service_status"
 }
-
 view_logs() {
     LOG_FILE="/tmp/proxy.log"
     if [ -f "$LOG_FILE" ]; then
