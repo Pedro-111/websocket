@@ -219,16 +219,25 @@ class ConnectionHandler:
             if error:
                 break
 
-def main(host=IP, port=PORT):
-    logging.info(f"Iniciando proxy en {host}:{port}")
-    server = Server(host, port)
-    server.start()
+def main():
+    ports = [int(port) for port in sys.argv[1:]]
+    if not ports:
+        ports = [80]  # Puerto por defecto si no se especifica ninguno
+    
+    servers = []
+    for port in ports:
+        logging.info(f"Iniciando proxy en {IP}:{port}")
+        server = Server(IP, port)
+        server.start()
+        servers.append(server)
+    
     try:
         while True:
             time.sleep(2)
     except KeyboardInterrupt:
-        logging.info('Deteniendo el servidor...')
-        server.close()
+        logging.info('Deteniendo los servidores...')
+        for server in servers:
+            server.close()
 
 if __name__ == '__main__':
     main()
