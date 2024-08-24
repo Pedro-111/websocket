@@ -3,7 +3,7 @@
 PROXY_PATH="/usr/local/bin/proxy.py"
 SERVICE_NAME="websocket-proxy"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-GITHUB_RAW_URL="https://raw.githubusercontent.com/su-usuario/su-repositorio/main/proxy.py"
+GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/master/proxy.py"
 
 download_proxy_script() {
     echo "Descargando la última versión de proxy.py..."

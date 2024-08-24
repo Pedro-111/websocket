@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # encoding: utf-8
-# SSHPLUS By @Crazy_vpn
+
 import socket
 import threading
 import select
@@ -23,7 +23,7 @@ except (IndexError, ValueError):
 PASS = os.environ.get('PROXY_PASS', '')  # Obtener contraseña desde variable de entorno
 BUFLEN = 8196 * 8
 TIMEOUT = 60
-MSG = 'SSHPLUS'
+MSG = 'WSS'
 COR = '<font color="null">'
 FTAG = '</font>'
 DEFAULT_HOST = '0.0.0.0:22'
