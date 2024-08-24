@@ -22,8 +22,8 @@ After=network.target
 [Service]
 ExecStart=/usr/bin/python3 $PROXY_PATH $ports
 Restart=on-failure
-User=nobody
-Group=nogroup
+User=root
+Group=root
 
 [Install]
 WantedBy=multi-user.target
@@ -33,7 +33,6 @@ EOF
     sudo systemctl enable $SERVICE_NAME
     sudo systemctl start $SERVICE_NAME
 }
-
 open_port() {
     read -p "Ingrese los puertos para el WebSocket (separados por espacios): " new_ports
     
@@ -131,21 +130,24 @@ view_open_ports() {
         return
     fi
 
-    echo "Puertos WebSocket abiertos:"
+    echo "Puertos WebSocket configurados:"
     echo "------------------------"
     printf "%-10s %-20s\n" "Puerto" "Estado"
     echo "------------------------"
     
     # Obtener los puertos desde el archivo de servicio
-    current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | sed 's/.*argv\[\]=//;s/ ;.*//' | awk '{print $NF}')
-    status=$(systemctl is-active $SERVICE_NAME)
+    current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | awk '{print substr($0, index($0,$NF))}')
     
-    # Mostrar los puertos y el estado del servicio
+    # Mostrar los puertos y su estado real
     for port in $current_ports; do
+        if netstat -tuln | grep -q ":$port "; then
+            status="Activo"
+        else
+            status="Inactivo"
+        fi
         printf "%-10s %-20s\n" "$port" "$status"
     done
 }
-
 
 view_logs() {
     LOG_FILE="/tmp/proxy.log"
