@@ -39,7 +39,7 @@ open_port() {
     read -p "Ingrese el puerto para el WebSocket: " port
     download_proxy_script
     if [ -f "$SERVICE_FILE" ]; then
-        sudo sed -i "s/ExecStart=.*/ExecStart=\/usr\/bin\/python3 $PROXY_PATH $port/" "$SERVICE_FILE"
+        sudo sed -i "s|ExecStart=.*|ExecStart=/usr/bin/python3 $PROXY_PATH $port|" "$SERVICE_FILE"
         sudo systemctl daemon-reload
         sudo systemctl restart $SERVICE_NAME
     else
