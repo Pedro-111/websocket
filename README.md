@@ -15,7 +15,7 @@ Python: Asegúrate de tener Python 3 instalado en tu sistema.
 sudo apt-get install python3
 ```
 📥 Instalación
-1. Clona el repositorio:
+1. Instalar y configurar el script:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Pedro-111/websocket/master/install.sh | bash
@@ -23,18 +23,10 @@ curl -sSL https://raw.githubusercontent.com/Pedro-111/websocket/master/install.s
 
 2. Ejecuta el script de instalación:
 
-Para instalar y configurar automáticamente el servicio:
+Para configurar automáticamente el servicio a traves del menú:
 
 ```bash
-sudo bash install.sh
-```
-
-Este script descargará manage_proxy.sh, y configurará los permisos necesarios.
-
-3. Ejecuta el gestor de proxy:
-
-```bash
-sudo bash manage_proxy.sh
+proxy-manager
 ```
 
 Sigue las instrucciones en pantalla para gestionar el proxy WebSocket.
