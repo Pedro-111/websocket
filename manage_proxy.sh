@@ -137,7 +137,7 @@ view_open_ports() {
     echo "------------------------"
     
     # Obtener los puertos desde el archivo de servicio
-    current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | awk '{print $NF}')
+    current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | sed 's/.*argv\[\]=//;s/ ;.*//' | awk '{print $NF}')
     status=$(systemctl is-active $SERVICE_NAME)
     
     # Mostrar los puertos y el estado del servicio
