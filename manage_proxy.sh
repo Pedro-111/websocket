@@ -136,9 +136,11 @@ view_open_ports() {
     printf "%-10s %-20s\n" "Puerto" "Estado"
     echo "------------------------"
     
-    current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | awk '{print $NF}' | tr -d '}' | tr -d '{')
+    # Obtener los puertos desde el archivo de servicio
+    current_ports=$(sudo netstat -tulpn | grep LISTEN | awk '{print $4}' | awk -F ':' '{print $2}')
     status=$(systemctl is-active $SERVICE_NAME)
     
+    # Mostrar los puertos y el estado del servicio
     for port in $current_ports; do
         printf "%-10s %-20s\n" "$port" "$status"
     done
