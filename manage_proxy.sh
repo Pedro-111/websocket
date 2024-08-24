@@ -4,6 +4,7 @@ PROXY_PATH="/usr/local/bin/proxy.py"
 SERVICE_NAME="websocket-proxy"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/master/proxy.py"
+LOG_FILE="/usr/local/bin/proxy.log"
 
 download_proxy_script() {
     echo "Descargando la última versión de proxy.py..."
@@ -79,13 +80,38 @@ remove_script() {
     fi
 }
 
+view_open_ports() {
+    echo "Puertos WebSocket abiertos:"
+    echo "------------------------"
+    printf "%-10s %-20s %-10s\n" "Puerto" "Estado" "PID"
+    echo "------------------------"
+    sudo ss -tlnp | grep python3 | while read -r line; do
+        port=$(echo $line | awk '{print $4}' | cut -d':' -f2)
+        pid=$(echo $line | awk '{print $6}' | cut -d',' -f2 | cut -d'=' -f2)
+        state="Activo"
+        printf "%-10s %-20s %-10s\n" "$port" "$state" "$pid"
+    done
+}
+
+view_logs() {
+    if [ -f "$LOG_FILE" ]; then
+        echo "Últimas 20 líneas del log de conexiones:"
+        echo "---------------------------------------"
+        tail -n 20 "$LOG_FILE"
+    else
+        echo "El archivo de log no existe en $LOG_FILE"
+    fi
+}
+
 while true; do
     echo "=== Gestión de Proxy WebSocket ==="
     echo "1. Abrir puerto WebSocket"
     echo "2. Cerrar puerto WebSocket"
     echo "3. Actualizar script"
     echo "4. Eliminar script"
-    echo "5. Salir"
+    echo "5. Ver puertos abiertos"
+    echo "6. Ver logs de conexiones"
+    echo "7. Salir"
     read -p "Seleccione una opción: " choice
 
     case $choice in
@@ -93,7 +119,9 @@ while true; do
         2) close_port ;;
         3) update_script ;;
         4) remove_script ;;
-        5) exit 0 ;;
+        5) view_open_ports ;;
+        6) view_logs ;;
+        7) exit 0 ;;
         *) echo "Opción inválida" ;;
     esac
 
