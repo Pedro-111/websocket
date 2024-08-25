@@ -138,12 +138,11 @@ remove_script() {
         echo "El script proxy.py no existe en $PROXY_PATH"
     fi
 }
-
 view_open_ports() {
     if [ ! -f "$SERVICE_FILE" ]; then
         echo "El servicio WebSocket no está instalado."
         return
-    }
+    fi
 
     echo "Puertos WebSocket configurados:"
     echo "------------------------"
@@ -172,6 +171,7 @@ view_open_ports() {
     echo "------------------------"
     echo "Estado del servicio: $service_status"
 }
+
 view_logs() {
     LOG_FILE="/tmp/proxy.log"
     if [ -f "$LOG_FILE" ]; then
