@@ -1,7 +1,11 @@
-🌐 WebSocket Proxy Manager
+# 🚀 Script de WebSocket Proxy Manager (Gestión de Proxy WebSocket)
+![Ubuntu](https://img.shields.io/badge/Ubuntu-18.04%20%7C%2020.04%20%7C%2022.04%20%7C%2024.04-orange)
+![License](https://img.shields.io/badge/License-GPLv3-blue)
+
+## 🌐 WebSocket Proxy Manager (Gestión de Proxy WebSocket)
 Bienvenido al WebSocket Proxy Manager, un script en Bash que te permite gestionar fácilmente un proxy WebSocket. Con este script, puedes abrir y cerrar puertos, actualizar el proxy, eliminarlo y ver los logs de las conexiones, todo con unos simples comandos.
 
-🚀 Características
+## 🚀 Características
 - Abrir puerto WebSocket: Configura un puerto para el proxy WebSocket y habilita el servicio.
 - Cerrar puerto WebSocket: Detén y desactiva el servicio del proxy.
 - Actualizar script: Descarga la última versión de proxy.py y reinicia el servicio si está en ejecución.
@@ -9,14 +13,14 @@ Bienvenido al WebSocket Proxy Manager, un script en Bash que te permite gestiona
 - Ver puertos abiertos: Muestra una lista de los puertos WebSocket actualmente activos.
 - Ver logs de conexiones: Accede rápidamente a los últimos registros de conexiones.
 
-🛠️ Requisitos
+## 🛠️ Requisitos
 Sistema Operativo: Linux (Probado en distribuciones basadas en Debian)
 Python: Asegúrate de tener Python 3 instalado en tu sistema.
 
 ```bash
 sudo apt-get install python3
 ```
-📥 Instalación
+## 📥 Instalación
 1. Instalar y configurar el script:
 
 ```bash
@@ -33,7 +37,7 @@ proxy-manager
 
 Sigue las instrucciones en pantalla para gestionar el proxy WebSocket.
 
-📚 Cómo Usar
+## 📚 Cómo Usar
 Una vez que el gestor está en marcha, verás un menú con opciones:
 
 1. Abrir puerto WebSocket: Configura y abre un nuevo puerto para el proxy.
@@ -44,7 +48,7 @@ Una vez que el gestor está en marcha, verás un menú con opciones:
 6. Ver logs de conexiones: Revisa las últimas 20 líneas de los registros de conexiones.
 7. Salir: Cierra el gestor.
 
-👨‍💻 Contribuciones
+## 👨‍💻 Contribuciones
 Las contribuciones son bienvenidas. Si tienes mejoras, errores que corregir o nuevas características, no dudes en hacer un fork del repositorio y enviar un pull request.
 
 📝 Licencia
