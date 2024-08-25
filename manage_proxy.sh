@@ -85,8 +85,13 @@ close_port() {
         return
     fi
 
-    current_ports=$(sudo systemctl show -p ExecStart --value $SERVICE_NAME | awk '{print $NF}')
+    current_ports=$(sudo grep ExecStart "$SERVICE_FILE" | awk '{for(i=NF;i>0;i--) if($i ~ /^[0-9]+$/) print $i}')
     read -p "Ingrese el puerto a cerrar (o 'all' para cerrar todos): " port
+    
+    if [ "$port" != "all" ] && ! echo "$current_ports" | grep -q "$port"; then
+    echo "El puerto $port no está en la configuración actual."
+    return
+    fi
 
     if [ "$port" == "all" ]; then
         sudo systemctl stop $SERVICE_NAME
@@ -95,7 +100,8 @@ close_port() {
         sudo systemctl daemon-reload
         echo "Servicio WebSocket detenido y deshabilitado. Todos los puertos cerrados."
     else
-        new_ports=$(echo $current_ports | sed "s/$port//g" | tr -s ' ')
+        new_ports=$(echo $current_ports | tr ' ' '\n' | grep -v "^$port$" | tr '\n' ' ')
+        new_ports=$(echo $new_ports | xargs)  # Elimina espacios extra
         if [ -z "$new_ports" ]; then
             sudo systemctl stop $SERVICE_NAME
             sudo systemctl disable $SERVICE_NAME
@@ -106,7 +112,7 @@ close_port() {
             sudo sed -i "s|ExecStart=.*|ExecStart=/usr/bin/python3 $PROXY_PATH $new_ports|" "$SERVICE_FILE"
             sudo systemctl daemon-reload
             sudo systemctl restart $SERVICE_NAME
-            echo "Puerto $port cerrado. Servicio actualizado con los puertos restantes."
+            echo "Puerto $port cerrado. Servicio actualizado con los puertos restantes: $new_ports"
         fi
     fi
 }
