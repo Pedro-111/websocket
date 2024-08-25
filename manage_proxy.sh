@@ -148,15 +148,52 @@ update_script() {
     fi
 }
 
-remove_script() {
-    if [ -f "$PROXY_PATH" ]; then
-        sudo rm "$PROXY_PATH"
-        close_port
-        echo "Script eliminado y servicio desinstalado."
+uninstall_script() {
+    echo "Proceso de desinstalación iniciado."
+
+    # Preguntar si se quiere parar el servicio de WebSocket
+    if confirm "¿Desea detener el servicio de WebSocket?"; then
+        sudo systemctl stop $SERVICE_NAME
+        sudo systemctl disable $SERVICE_NAME
+        sudo rm -f $SERVICE_FILE
+        sudo systemctl daemon-reload
+        echo "Servicio de WebSocket detenido y eliminado."
     else
-        echo "El script proxy.py no existe en $PROXY_PATH"
+        echo "El servicio de WebSocket se mantendrá en ejecución."
     fi
+
+    # Preguntar si se desea eliminar el script de gestión de proxy WebSocket
+    if confirm "¿Desea eliminar el script de gestión de proxy WebSocket?"; then
+        # Eliminar scripts
+        sudo rm -f "$PROXY_PATH"
+        sudo rm -f "$0"
+        
+        # Eliminar alias de proxy-manager
+        sed -i '/alias proxy-manager=/d' "$HOME/.bashrc"
+        
+        echo "Scripts eliminados y alias removido."
+        echo "Por favor, reinicie su terminal o ejecute 'source ~/.bashrc' para aplicar los cambios."
+        echo "Proceso de desinstalación completado."
+        exit 0
+    else
+        echo "Los scripts de gestión se mantendrán en su lugar."
+    fi
+
+    echo "Proceso de desinstalación completado."
 }
+
+# Función auxiliar para confirmar acciones
+confirm() {
+    while true; do
+        read -p "$1 (s/n): " choice
+        case "$choice" in
+            [Ss]* ) return 0;;
+            [Nn]* ) return 1;;
+            * ) echo "Por favor, responda con 's' o 'n'.";;
+        esac
+    done
+}
+
 view_open_ports() {
     if [ ! -f "$SERVICE_FILE" ]; then
         echo "El servicio WebSocket no está instalado."
@@ -217,7 +254,7 @@ while true; do
         1) open_port ;;
         2) close_port ;;
         3) update_script ;;
-        4) remove_script ;;
+        4) uninstall_script ;;
         5) view_open_ports ;;
         6) view_logs ;;
         7) exit 0 ;;
