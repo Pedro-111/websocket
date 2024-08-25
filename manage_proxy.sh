@@ -14,7 +14,8 @@ download_proxy_script() {
 
 create_service() {
     local ports=$1
-    cat << EOF | sudo tee "$SERVICE_FILE" > /dev/null
+    echo "Creando archivo de servicio con puertos: $ports"
+    cat << EOF | sudo tee "$SERVICE_FILE"
 [Unit]
 Description=WebSocket Proxy Service
 After=network.target
@@ -29,41 +30,53 @@ Group=root
 WantedBy=multi-user.target
 EOF
 
+    echo "Archivo de servicio creado. Contenido:"
+    sudo cat "$SERVICE_FILE"
+
+    echo "Recargando daemon de systemd..."
     sudo systemctl daemon-reload
+    echo "Habilitando servicio..."
     sudo systemctl enable $SERVICE_NAME
-    sudo systemctl restart $SERVICE_NAME
+    echo "Iniciando servicio..."
+    sudo systemctl start $SERVICE_NAME
+    echo "Estado del servicio:"
+    sudo systemctl status $SERVICE_NAME
 }
 
 open_port() {
     read -p "Ingrese los puertos para el WebSocket (separados por espacios): " new_ports
     
     if [ -f "$SERVICE_FILE" ]; then
-        # Si el servicio ya existe, obtenemos los puertos actuales
         current_ports=$(sudo grep ExecStart "$SERVICE_FILE" | awk '{for(i=NF;i>0;i--) if($i ~ /^[0-9]+$/) print $i}')
-        
-        # Combinamos los puertos actuales con los nuevos, eliminando duplicados
         all_ports=$(echo "$current_ports $new_ports" | tr ' ' '\n' | sort -u | tr '\n' ' ')
         
-        # Verificamos si hay puertos nuevos para agregar
         if [ "$all_ports" = "$current_ports" ]; then
             echo "No se han añadido nuevos puertos. Los puertos solicitados ya están en uso."
             return
         fi
         
-        # Actualizamos el archivo de servicio con todos los puertos
+        echo "Actualizando el archivo de servicio..."
         sudo sed -i "s|ExecStart=.*|ExecStart=/usr/bin/python3 $PROXY_PATH $all_ports|" "$SERVICE_FILE"
+        echo "Archivo de servicio actualizado."
     else
-        # Si el servicio no existe, lo creamos con los nuevos puertos
+        echo "Creando nuevo archivo de servicio..."
         create_service "$new_ports"
+        echo "Archivo de servicio creado."
     fi
     
+    echo "Recargando daemon de systemd..."
     sudo systemctl daemon-reload
+    echo "Daemon recargado."
+
+    echo "Reiniciando el servicio..."
     if sudo systemctl restart $SERVICE_NAME; then
-        echo "Puertos WebSocket actualizados. Servicio reiniciado con los siguientes puertos: $all_ports"
+        echo "Servicio reiniciado exitosamente."
     else
-        echo "Error al reiniciar el servicio. Verifique los logs del sistema."
+        echo "Error al reiniciar el servicio. Mostrando estado del servicio:"
         sudo systemctl status $SERVICE_NAME
     fi
+
+    echo "Puertos WebSocket actualizados. Servicio reiniciado con los siguientes puertos: $all_ports"
 }
 
 close_port() {
