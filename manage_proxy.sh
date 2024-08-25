@@ -23,8 +23,8 @@ After=network.target
 [Service]
 ExecStart=/usr/bin/python3 $PROXY_PATH $ports
 Restart=on-failure
-User=root
-Group=root
+User=nobody
+Group=nogroup
 
 [Install]
 WantedBy=multi-user.target
