@@ -19,7 +19,7 @@ PROXY_PATH="/usr/local/bin/proxy.py"
 SERVICE_NAME="websocket-proxy"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/debian/proxy.py"
-LOG_FILE="/var/log/websocket-proxy.log"
+LOG_FILE="/tmp/proxy.log"
 
 download_proxy_script() {
     echo "Descargando la última versión de proxy.py..."
