@@ -3,7 +3,8 @@
 # Definir variables
 INSTALL_DIR="$HOME/.local/bin"
 SCRIPT_NAME="manage_proxy.sh"
-GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/debian/manage_proxy.sh"
+PROXY_SCRIPT="proxy.py"
+GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/debian"
 
 # Función para instalar dependencias
 install_dependencies() {
@@ -22,12 +23,15 @@ install_dependencies
 # Crear el directorio de instalación si no existe
 mkdir -p "$INSTALL_DIR"
 
-# Descargar el script
+# Descargar los scripts
 echo "Descargando $SCRIPT_NAME..."
-curl -sSL "$GITHUB_RAW_URL" -o "$INSTALL_DIR/$SCRIPT_NAME"
+curl -sSL "$GITHUB_RAW_URL/$SCRIPT_NAME" -o "$INSTALL_DIR/$SCRIPT_NAME"
+echo "Descargando $PROXY_SCRIPT..."
+sudo curl -sSL "$GITHUB_RAW_URL/$PROXY_SCRIPT" -o "/usr/local/bin/$PROXY_SCRIPT"
 
-# Hacer el script ejecutable
+# Hacer los scripts ejecutables
 chmod +x "$INSTALL_DIR/$SCRIPT_NAME"
+sudo chmod +x "/usr/local/bin/$PROXY_SCRIPT"
 
 # Agregar el directorio al PATH si no está ya
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
@@ -43,12 +47,3 @@ source "$HOME/.bashrc"
 
 echo "Instalación completada. El comando 'proxy-manager' está ahora disponible."
 echo "Puede ejecutar 'proxy-manager' en cualquier momento para gestionar el proxy WebSocket."
-
-# Modificar el script manage_proxy.sh para hacerlo compatible con Debian
-sed -i 's|/tmp/proxy.log|/var/log/websocket-proxy.log|g' "$INSTALL_DIR/$SCRIPT_NAME"
-sed -i 's|/usr/bin/python3|$(which python3)|g' "$INSTALL_DIR/$SCRIPT_NAME"
-
-# Agregar comprobación de systemctl
-sed -i '1s|^|#!/bin/bash\n\nif ! command -v systemctl &> /dev/null; then\n    echo "systemctl no está disponible. Este script requiere systemd."\n    exit 1\nfi\n\n|' "$INSTALL_DIR/$SCRIPT_NAME"
-
-echo "El script manage_proxy.sh ha sido modificado para ser compatible con Debian y Ubuntu."
