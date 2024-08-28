@@ -1,9 +1,16 @@
 #!/bin/bash
 
+# Comprobar si systemctl está disponible
+if ! command -v systemctl &> /dev/null; then
+    echo "systemctl no está disponible. Este script requiere systemd."
+    exit 1
+fi
+
 PROXY_PATH="/usr/local/bin/proxy.py"
 SERVICE_NAME="websocket-proxy"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/master/proxy.py"
+LOG_FILE="/var/log/websocket-proxy.log"
 
 download_proxy_script() {
     echo "Descargando la última versión de proxy.py..."
@@ -21,7 +28,7 @@ Description=WebSocket Proxy Service
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 $PROXY_PATH $ports
+ExecStart=$(which python3) $PROXY_PATH $ports
 Restart=on-failure
 User=nobody
 Group=nogroup
@@ -56,7 +63,7 @@ open_port() {
         fi
         
         echo "Actualizando el archivo de servicio..."
-        sudo sed -i "s|ExecStart=.*|ExecStart=/usr/bin/python3 $PROXY_PATH $all_ports|" "$SERVICE_FILE"
+        sudo sed -i "s|ExecStart=.*|ExecStart=$(which python3) $PROXY_PATH $all_ports|" "$SERVICE_FILE"
         echo "Archivo de servicio actualizado."
     else
         echo "Creando nuevo archivo de servicio..."
@@ -89,8 +96,8 @@ close_port() {
     read -p "Ingrese el puerto a cerrar (o 'all' para cerrar todos): " port
     
     if [ "$port" != "all" ] && ! echo "$current_ports" | grep -q "$port"; then
-    echo "El puerto $port no está en la configuración actual."
-    return
+        echo "El puerto $port no está en la configuración actual."
+        return
     fi
 
     if [ "$port" == "all" ]; then
@@ -109,7 +116,7 @@ close_port() {
             sudo systemctl daemon-reload
             echo "Último puerto cerrado. Servicio WebSocket detenido y deshabilitado."
         else
-            sudo sed -i "s|ExecStart=.*|ExecStart=/usr/bin/python3 $PROXY_PATH $new_ports|" "$SERVICE_FILE"
+            sudo sed -i "s|ExecStart=.*|ExecStart=$(which python3) $PROXY_PATH $new_ports|" "$SERVICE_FILE"
             sudo systemctl daemon-reload
             sudo systemctl restart $SERVICE_NAME
             echo "Puerto $port cerrado. Servicio actualizado con los puertos restantes: $new_ports"
@@ -229,11 +236,10 @@ view_open_ports() {
 }
 
 view_logs() {
-    LOG_FILE="/tmp/proxy.log"
     if [ -f "$LOG_FILE" ]; then
         echo "Últimas 20 líneas del log de conexiones:"
         echo "---------------------------------------"
-        tail -n 20 "$LOG_FILE"
+        sudo tail -n 20 "$LOG_FILE"
     else
         echo "El archivo de log no existe en $LOG_FILE"
     fi
