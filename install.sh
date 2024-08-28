@@ -3,7 +3,7 @@
 # Definir variables
 INSTALL_DIR="$HOME/.local/bin"
 SCRIPT_NAME="manage_proxy.sh"
-GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/master/manage_proxy.sh"
+GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/debian/manage_proxy.sh"
 
 # Función para instalar dependencias
 install_dependencies() {
