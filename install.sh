@@ -27,5 +27,5 @@ echo "alias proxy-manager='$INSTALL_DIR/$SCRIPT_NAME'" >> "$HOME/.bashrc"
 # Aplicar los cambios inmediatamente
 source ~/.bashrc
 
-echo "Instalación completada. El comando 'proxy-manager' está ahora disponible."
+echo "Instalación completada. Ejecuta el comando 'source ~/.bashrc'. El comando 'proxy-manager' estára ahora disponible."
 echo "Puede ejecutar 'proxy-manager' en cualquier momento para gestionar el proxy WebSocket."
