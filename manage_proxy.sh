@@ -18,7 +18,7 @@ fi
 PROXY_PATH="/usr/local/bin/proxy.py"
 SERVICE_NAME="websocket-proxy"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/debian/proxy.py"
+GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/ubuntu-debian/proxy.py"
 LOG_FILE="/tmp/proxy.log"
 
 download_proxy_script() {
@@ -144,14 +144,14 @@ close_port() {
 update_script() {
     # Actualizar proxy.py
     echo "Actualizando proxy.py..."
-    run_as_root wget -O "$PROXY_PATH" "https://raw.githubusercontent.com/Pedro-111/websocket/debian/proxy.py"
+    run_as_root wget -O "$PROXY_PATH" "https://raw.githubusercontent.com/Pedro-111/websocket/ubuntu-debian/proxy.py"
     run_as_root chmod +x "$PROXY_PATH"
     echo "proxy.py actualizado."
 
     # Actualizar manage_proxy.sh
     echo "Actualizando manage_proxy.sh..."
     TEMP_SCRIPT="/tmp/manage_proxy_temp.sh"
-    wget -O "$TEMP_SCRIPT" "https://raw.githubusercontent.com/Pedro-111/websocket/debian/manage_proxy.sh"
+    wget -O "$TEMP_SCRIPT" "https://raw.githubusercontent.com/Pedro-111/websocket/ubuntu-debian/manage_proxy.sh"
     
     if [ -f "$TEMP_SCRIPT" ]; then
         run_as_root mv "$TEMP_SCRIPT" "$0"
