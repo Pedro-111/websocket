@@ -1,5 +1,6 @@
 # 🚀 Script de WebSocket Proxy Manager (Gestión de Proxy WebSocket)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-18.04%20%7C%2020.04%20%7C%2022.04%20%7C%2024.04-orange)
+![Debian](https://img.shields.io/badge/Debian-10%20%7C%2011%20%7C%2012-red)
 ![License](https://img.shields.io/badge/License-GPLv3-blue)
 
 ## 🌐 WebSocket Proxy Manager (Gestión de Proxy WebSocket)
