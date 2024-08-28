@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Función para ejecutar comandos como root
+run_as_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
 # Definir variables
 INSTALL_DIR="$HOME/.local/bin"
 SCRIPT_NAME="manage_proxy.sh"
@@ -8,13 +17,8 @@ GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/debian"
 
 # Función para instalar dependencias
 install_dependencies() {
-    if [ -x "$(command -v apt-get)" ]; then
-        sudo apt-get update
-        sudo apt-get install -y curl wget python3 netstat-nat
-    else
-        echo "No se pudo encontrar el gestor de paquetes apt-get. Por favor, instale manualmente curl, wget, python3 y netstat-nat."
-        exit 1
-    fi
+    run_as_root apt-get update
+    run_as_root apt-get install -y curl wget python3 net-tools
 }
 
 # Instalar dependencias
@@ -27,11 +31,11 @@ mkdir -p "$INSTALL_DIR"
 echo "Descargando $SCRIPT_NAME..."
 curl -sSL "$GITHUB_RAW_URL/$SCRIPT_NAME" -o "$INSTALL_DIR/$SCRIPT_NAME"
 echo "Descargando $PROXY_SCRIPT..."
-sudo curl -sSL "$GITHUB_RAW_URL/$PROXY_SCRIPT" -o "/usr/local/bin/$PROXY_SCRIPT"
+run_as_root curl -sSL "$GITHUB_RAW_URL/$PROXY_SCRIPT" -o "/usr/local/bin/$PROXY_SCRIPT"
 
 # Hacer los scripts ejecutables
 chmod +x "$INSTALL_DIR/$SCRIPT_NAME"
-sudo chmod +x "/usr/local/bin/$PROXY_SCRIPT"
+run_as_root chmod +x "/usr/local/bin/$PROXY_SCRIPT"
 
 # Agregar el directorio al PATH si no está ya
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
