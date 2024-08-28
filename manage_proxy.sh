@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Función para ejecutar comandos como root
+run_as_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
 # Comprobar si systemctl está disponible
 if ! command -v systemctl &> /dev/null; then
     echo "systemctl no está disponible. Este script requiere systemd."
@@ -10,19 +19,19 @@ PROXY_PATH="/usr/local/bin/proxy.py"
 SERVICE_NAME="websocket-proxy"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/debian/proxy.py"
-LOG_FILE="/tmp/proxy.log"
+LOG_FILE="/var/log/websocket-proxy.log"
 
 download_proxy_script() {
     echo "Descargando la última versión de proxy.py..."
-    sudo wget -O "$PROXY_PATH" "$GITHUB_RAW_URL"
-    sudo chmod +x "$PROXY_PATH"
+    run_as_root curl -sSL "$GITHUB_RAW_URL" -o "$PROXY_PATH"
+    run_as_root chmod +x "$PROXY_PATH"
     echo "proxy.py actualizado."
 }
 
 create_service() {
     local ports=$1
     echo "Creando archivo de servicio con puertos: $ports"
-    cat << EOF | sudo tee "$SERVICE_FILE"
+    cat << EOF | run_as_root tee "$SERVICE_FILE"
 [Unit]
 Description=WebSocket Proxy Service
 After=network.target
@@ -38,23 +47,31 @@ WantedBy=multi-user.target
 EOF
 
     echo "Archivo de servicio creado. Contenido:"
-    sudo cat "$SERVICE_FILE"
+    run_as_root cat "$SERVICE_FILE"
 
     echo "Recargando daemon de systemd..."
-    sudo systemctl daemon-reload
+    run_as_root systemctl daemon-reload
     echo "Habilitando servicio..."
-    sudo systemctl enable $SERVICE_NAME
+    run_as_root systemctl enable $SERVICE_NAME
     echo "Iniciando servicio..."
-    sudo systemctl start $SERVICE_NAME
+    run_as_root systemctl start $SERVICE_NAME
     echo "Estado del servicio:"
-    sudo systemctl status $SERVICE_NAME
+    run_as_root systemctl status $SERVICE_NAME
+}
+
+check_proxy_script() {
+    if [ ! -f "$PROXY_PATH" ]; then
+        echo "El archivo proxy.py no existe. Descargándolo..."
+        download_proxy_script
+    fi
 }
 
 open_port() {
+    check_proxy_script
     read -p "Ingrese los puertos para el WebSocket (separados por espacios): " new_ports
     
     if [ -f "$SERVICE_FILE" ]; then
-        current_ports=$(sudo grep ExecStart "$SERVICE_FILE" | awk '{for(i=NF;i>0;i--) if($i ~ /^[0-9]+$/) print $i}')
+        current_ports=$(run_as_root grep ExecStart "$SERVICE_FILE" | awk '{for(i=NF;i>0;i--) if($i ~ /^[0-9]+$/) print $i}')
         all_ports=$(echo "$current_ports $new_ports" | tr ' ' '\n' | sort -u | tr '\n' ' ')
         
         if [ "$all_ports" = "$current_ports" ]; then
@@ -63,7 +80,7 @@ open_port() {
         fi
         
         echo "Actualizando el archivo de servicio..."
-        sudo sed -i "s|ExecStart=.*|ExecStart=$(which python3) $PROXY_PATH $all_ports|" "$SERVICE_FILE"
+        run_as_root sed -i "s|ExecStart=.*|ExecStart=$(which python3) $PROXY_PATH $all_ports|" "$SERVICE_FILE"
         echo "Archivo de servicio actualizado."
     else
         echo "Creando nuevo archivo de servicio..."
@@ -72,15 +89,15 @@ open_port() {
     fi
     
     echo "Recargando daemon de systemd..."
-    sudo systemctl daemon-reload
+    run_as_root systemctl daemon-reload
     echo "Daemon recargado."
 
     echo "Reiniciando el servicio..."
-    if sudo systemctl restart $SERVICE_NAME; then
+    if run_as_root systemctl restart $SERVICE_NAME; then
         echo "Servicio reiniciado exitosamente."
     else
         echo "Error al reiniciar el servicio. Mostrando estado del servicio:"
-        sudo systemctl status $SERVICE_NAME
+        run_as_root systemctl status $SERVICE_NAME
     fi
 
     echo "Puertos WebSocket actualizados. Servicio reiniciado con los siguientes puertos: $all_ports"
@@ -92,7 +109,7 @@ close_port() {
         return
     fi
 
-    current_ports=$(sudo grep ExecStart "$SERVICE_FILE" | awk '{for(i=NF;i>0;i--) if($i ~ /^[0-9]+$/) print $i}')
+    current_ports=$(run_as_root grep ExecStart "$SERVICE_FILE" | awk '{for(i=NF;i>0;i--) if($i ~ /^[0-9]+$/) print $i}')
     read -p "Ingrese el puerto a cerrar (o 'all' para cerrar todos): " port
     
     if [ "$port" != "all" ] && ! echo "$current_ports" | grep -q "$port"; then
@@ -101,24 +118,24 @@ close_port() {
     fi
 
     if [ "$port" == "all" ]; then
-        sudo systemctl stop $SERVICE_NAME
-        sudo systemctl disable $SERVICE_NAME
-        sudo rm "$SERVICE_FILE"
-        sudo systemctl daemon-reload
+        run_as_root systemctl stop $SERVICE_NAME
+        run_as_root systemctl disable $SERVICE_NAME
+        run_as_root rm "$SERVICE_FILE"
+        run_as_root systemctl daemon-reload
         echo "Servicio WebSocket detenido y deshabilitado. Todos los puertos cerrados."
     else
         new_ports=$(echo $current_ports | tr ' ' '\n' | grep -v "^$port$" | tr '\n' ' ')
         new_ports=$(echo $new_ports | xargs)  # Elimina espacios extra
         if [ -z "$new_ports" ]; then
-            sudo systemctl stop $SERVICE_NAME
-            sudo systemctl disable $SERVICE_NAME
-            sudo rm "$SERVICE_FILE"
-            sudo systemctl daemon-reload
+            run_as_root systemctl stop $SERVICE_NAME
+            run_as_root systemctl disable $SERVICE_NAME
+            run_as_root rm "$SERVICE_FILE"
+            run_as_root systemctl daemon-reload
             echo "Último puerto cerrado. Servicio WebSocket detenido y deshabilitado."
         else
-            sudo sed -i "s|ExecStart=.*|ExecStart=$(which python3) $PROXY_PATH $new_ports|" "$SERVICE_FILE"
-            sudo systemctl daemon-reload
-            sudo systemctl restart $SERVICE_NAME
+            run_as_root sed -i "s|ExecStart=.*|ExecStart=$(which python3) $PROXY_PATH $new_ports|" "$SERVICE_FILE"
+            run_as_root systemctl daemon-reload
+            run_as_root systemctl restart $SERVICE_NAME
             echo "Puerto $port cerrado. Servicio actualizado con los puertos restantes: $new_ports"
         fi
     fi
@@ -127,8 +144,8 @@ close_port() {
 update_script() {
     # Actualizar proxy.py
     echo "Actualizando proxy.py..."
-    sudo wget -O "$PROXY_PATH" "https://raw.githubusercontent.com/Pedro-111/websocket/debian/proxy.py"
-    sudo chmod +x "$PROXY_PATH"
+    run_as_root wget -O "$PROXY_PATH" "https://raw.githubusercontent.com/Pedro-111/websocket/debian/proxy.py"
+    run_as_root chmod +x "$PROXY_PATH"
     echo "proxy.py actualizado."
 
     # Actualizar manage_proxy.sh
@@ -137,8 +154,8 @@ update_script() {
     wget -O "$TEMP_SCRIPT" "https://raw.githubusercontent.com/Pedro-111/websocket/debian/manage_proxy.sh"
     
     if [ -f "$TEMP_SCRIPT" ]; then
-        sudo mv "$TEMP_SCRIPT" "$0"
-        sudo chmod +x "$0"
+        run_as_root mv "$TEMP_SCRIPT" "$0"
+        run_as_root chmod +x "$0"
         echo "manage_proxy.sh actualizado."
         echo "Por favor, reinicie el script para aplicar los cambios."
         exit 0
@@ -148,7 +165,7 @@ update_script() {
 
     # Reiniciar el servicio si está activo
     if systemctl is-active --quiet $SERVICE_NAME; then
-        sudo systemctl restart $SERVICE_NAME
+        run_as_root systemctl restart $SERVICE_NAME
         echo "Servicio reiniciado con la nueva versión de los scripts."
     else
         echo "Scripts actualizados. El servicio no estaba en ejecución."
@@ -160,10 +177,10 @@ uninstall_script() {
 
     # Preguntar si se quiere parar el servicio de WebSocket
     if confirm "¿Desea detener el servicio de WebSocket?"; then
-        sudo systemctl stop $SERVICE_NAME
-        sudo systemctl disable $SERVICE_NAME
-        sudo rm -f $SERVICE_FILE
-        sudo systemctl daemon-reload
+        run_as_root systemctl stop $SERVICE_NAME
+        run_as_root systemctl disable $SERVICE_NAME
+        run_as_root rm -f $SERVICE_FILE
+        run_as_root systemctl daemon-reload
         echo "Servicio de WebSocket detenido y eliminado."
     else
         echo "El servicio de WebSocket se mantendrá en ejecución."
@@ -172,8 +189,8 @@ uninstall_script() {
     # Preguntar si se desea eliminar el script de gestión de proxy WebSocket
     if confirm "¿Desea eliminar el script de gestión de proxy WebSocket?"; then
         # Eliminar scripts
-        sudo rm -f "$PROXY_PATH"
-        sudo rm -f "$0"
+        run_as_root rm -f "$PROXY_PATH"
+        run_as_root rm -f "$0"
         
         # Eliminar alias de proxy-manager
         sed -i '/alias proxy-manager=/d' "$HOME/.bashrc"
@@ -213,7 +230,7 @@ view_open_ports() {
     echo "------------------------"
     
     # Obtener los puertos desde el archivo de servicio
-    current_ports=$(sudo grep ExecStart "$SERVICE_FILE" | awk '{for(i=NF;i>0;i--) if($i ~ /^[0-9]+$/) print $i}')
+    current_ports=$(run_as_root grep ExecStart "$SERVICE_FILE" | awk '{for(i=NF;i>0;i--) if($i ~ /^[0-9]+$/) print $i}')
     
     # Obtener el estado del servicio
     service_status=$(systemctl is-active $SERVICE_NAME)
@@ -222,7 +239,7 @@ view_open_ports() {
         echo "No se encontraron puertos configurados."
     else
         for port in $current_ports; do
-            if [ "$service_status" = "active" ] && sudo netstat -tuln | grep -q ":$port "; then
+            if [ "$service_status" = "active" ] && run_as_root netstat -tuln | grep -q ":$port "; then
                 status="Activo"
             else
                 status="Inactivo"
@@ -239,7 +256,7 @@ view_logs() {
     if [ -f "$LOG_FILE" ]; then
         echo "Últimas 20 líneas del log de conexiones:"
         echo "---------------------------------------"
-        sudo tail -n 20 "$LOG_FILE"
+        run_as_root tail -n 20 "$LOG_FILE"
     else
         echo "El archivo de log no existe en $LOG_FILE"
     fi
