@@ -403,75 +403,136 @@ confirm() {
     done
 }
 
-# Función para mostrar estadísticas en tiempo real
 show_statistics() {
-    # Colores adicionales
+    # Colores
     PURPLE='\033[0;35m'
     WHITE='\033[1;37m'
+    CYAN='\033[0;36m'
     
-    # Array asociativo para conexiones activas por puerto
+    # Arrays asociativos para el tracking
     declare -A active_connections
     declare -A port_connections_count
+    declare -A connection_data
+    declare -A transfer_data
 
-    # Función para validar si es una conexión de cliente
+    # Función para formatear bytes
+    format_bytes() {
+        local bytes=$1
+        if [[ $bytes -lt 1024 ]]; then
+            echo "${bytes}B"
+        elif [[ $bytes -lt 1048576 ]]; then
+            echo "$(printf "%.1f" $(echo "$bytes/1024" | bc -l))KB"
+        else
+            echo "$(printf "%.1f" $(echo "$bytes/1048576" | bc -l))MB"
+        fi
+    }
+
+    # Función para validar conexión de cliente
     is_client_connection() {
         local ip="$1"
-        # Filtrar conexiones localhost/servidor
-        if [[ "$ip" == "127.0.0.1" ]] || [[ "$ip" == "::1" ]] || [[ "$ip" == "localhost" ]]; then
-            return 1
-        fi
-        return 0
+        [[ "$ip" != "127.0.0.1" && "$ip" != "::1" && "$ip" != "localhost" ]]
     }
 
     # Función para limpiar formato de dirección
     clean_address() {
         local addr="$1"
-        # Eliminar caracteres no deseados y espacios
-        echo "$addr" | sed -e "s/[()']//g" -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+        # Eliminar paréntesis, comas y espacios extra
+        echo "$addr" | sed -e 's/[(),]//g' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
     }
 
-    # Función para mostrar el encabezado
-    show_header() {
-        clear
-        echo -e "${YELLOW}=== Monitor de Conexiones WebSocket ===${NC}"
-        echo -e "${BLUE}Monitoreando conexiones en tiempo real...${NC}"
-        echo -e "${PURPLE}Fecha y hora: ${NC}$(date '+%Y-%m-%d %H:%M:%S')"
-        echo -e "${YELLOW}Presione 0 para salir${NC}\n"
+    # Función para extraer IP y puerto
+    parse_connection() {
+        local addr="$1"
+        local ip=""
+        local port=""
         
-        if systemctl is-active --quiet $SERVICE_NAME; then
-            echo -e "${GREEN}Estado del servicio: Activo${NC}"
-            
-            # Mostrar puertos configurados y su estado
-            echo -e "\n${WHITE}Estado de puertos:${NC}"
-            echo "╔════════════╦═══════════╦══════════════════╗"
-            echo "║   Puerto   ║  Estado   ║    Conexiones    ║"
-            echo "╠════════════╬═══════════╬══════════════════╣"
-            
-            local ports=$(run_as_root grep ExecStart "$SERVICE_FILE" | grep -oP '\d+')
-            for port in $ports; do
-                local port_status
-                local conn_count=${port_connections_count[$port]:-0}
-                
-                if run_as_root netstat -tuln | grep -q ":$port "; then
-                    port_status="${GREEN}Activo${NC}"
-                else
-                    port_status="${RED}Inactivo${NC}"
-                fi
-                
-                printf "║ %-10s ║ %-25b ║ %-16s ║\n" "$port" "$port_status" "$conn_count"
-            done
-            echo "╚════════════╩═══════════╩══════════════════╝"
-        else
-            echo -e "${RED}Estado del servicio: Inactivo${NC}"
-            return 1
+        # Extraer IP y puerto usando regex
+        if [[ $addr =~ ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):([0-9]+) ]]; then
+            ip="${BASH_REMATCH[1]}"
+            port="${BASH_REMATCH[2]}"
         fi
         
-        # Mostrar uso de recursos
-        local cpu_usage=$(ps aux | grep "[p]roxy.py" | awk '{sum+=$3} END {print sum}')
-        local mem_usage=$(ps aux | grep "[p]roxy.py" | awk '{sum+=$4} END {print sum}')
-        echo -e "\n${BLUE}Uso de recursos:${NC}"
-        echo -e "CPU: ${YELLOW}${cpu_usage}%${NC}"
-        echo -e "Memoria: ${YELLOW}${mem_usage}%${NC}"
+        echo "$ip:$port"
+    }
+
+    # Función para mostrar el encabezado con animación
+    show_header() {
+        clear
+        local animation=( "⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏" )
+        local frame=${animation[$((RANDOM % ${#animation[@]}))]}
+        
+        echo -e "${YELLOW}═══════════════════════════════════════════════${NC}"
+        echo -e "${YELLOW}║      Monitor Avanzado de Conexiones ${frame}     ║${NC}"
+        echo -e "${YELLOW}═══════════════════════════════════════════════${NC}"
+        echo -e "${PURPLE}Fecha: ${NC}$(date '+%Y-%m-%d') ${PURPLE}Hora: ${NC}$(date '+%H:%M:%S')"
+        echo -e "${YELLOW}Presione [0] para salir | [r] para refrescar${NC}\n"
+
+        if systemctl is-active --quiet $SERVICE_NAME; then
+            echo -e "${GREEN}● Servicio Activo${NC}"
+            
+            # Recursos del sistema
+            local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}')
+            local mem_total=$(free -m | awk 'NR==2{print $2}')
+            local mem_used=$(free -m | awk 'NR==2{print $3}')
+            local mem_percent=$(awk "BEGIN {printf \"%.1f\", $mem_used*100/$mem_total}")
+            
+            echo -e "\n${CYAN}═══ Recursos del Sistema ═══${NC}"
+            echo -e "CPU: ${GREEN}${cpu_usage}%${NC} | RAM: ${GREEN}${mem_percent}%${NC} (${mem_used}MB/${mem_total}MB)"
+        else
+            echo -e "${RED}○ Servicio Inactivo${NC}"
+            return 1
+        fi
+    }
+
+    # Función para mostrar la tabla de conexiones con detalles
+    show_connections_table() {
+        echo -e "\n${CYAN}═══ Conexiones Activas ═══${NC}"
+        printf "╔════════════════════╦═══════════╦══════════════════╦════════════════╗\n"
+        printf "║     IP Cliente     ║  Puerto   ║    Conectado     ║    Tráfico    ║\n"
+        printf "╠════════════════════╬═══════════╬══════════════════╬════════════════╣\n"
+        
+        local now=$(date +%s)
+        if [ ${#active_connections[@]} -eq 0 ]; then
+            printf "║%-72s║\n" "                      No hay conexiones activas                      "
+        else
+            for addr in "${!active_connections[@]}"; do
+                local connection=$(parse_connection "$addr")
+                local ip=$(echo "$connection" | cut -d: -f1)
+                local port=$(echo "$connection" | cut -d: -f2)
+                local timestamp="${active_connections[$addr]}"
+                local traffic="${transfer_data[$addr]:-0}"
+                
+                # Solo mostrar si tenemos una IP y puerto válidos
+                if [[ -n "$ip" && -n "$port" ]]; then
+                    local conn_time=$(date -d "$timestamp" +%s)
+                    local duration=$((now - conn_time))
+                    local duration_str=$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))
+                    local traffic_str=$(format_bytes $traffic)
+                    
+                    printf "║ %-18s ║ %-9s ║ %-16s ║ %-14s ║\n" \
+                        "$ip" "$port" "$duration_str" "$traffic_str"
+                fi
+            done
+        fi
+        
+        printf "╚════════════════════╩═══════════╩══════════════════╩════════════════╝\n"
+        
+        # Estadísticas globales
+        echo -e "\n${CYAN}═══ Estadísticas Globales ═══${NC}"
+        echo -e "Conexiones activas: ${GREEN}${#active_connections[@]}${NC}"
+        
+        # Actividad por puerto
+        echo -e "\n${CYAN}═══ Actividad por Puerto ═══${NC}"
+        printf "╔═══════════╦════════════════╗\n"
+        printf "║  Puerto   ║   Conexiones   ║\n"
+        printf "╠═══════════╬════════════════╣\n"
+        for port in "${!port_connections_count[@]}"; do
+            local clean_port=$(clean_address "$port")
+            if [[ $clean_port =~ ^[0-9]+$ ]]; then
+                printf "║ %-9s ║ %-14d ║\n" "$clean_port" "${port_connections_count[$port]}"
+            fi
+        done
+        printf "╚═══════════╩════════════════╝\n"
     }
 
     # Función para procesar cada línea del log
@@ -482,98 +543,79 @@ show_statistics() {
             local ip=$(echo "$addr" | cut -d: -f1)
             local port=$(echo "$addr" | cut -d: -f2)
             
-            # Solo procesar conexiones de clientes
             if is_client_connection "$ip"; then
-                local timestamp=$(echo "$line" | grep -oP '\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}')
+                local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
                 active_connections["$addr"]="$timestamp"
                 ((port_connections_count[$port]++))
+                connection_data["$addr"]="$timestamp"
+                transfer_data["$addr"]=0
+                
+                # Notificación de nueva conexión
+                echo -e "\n${GREEN}[+] Nueva conexión desde $ip:$port${NC}"
             fi
         elif [[ $line =~ "Conexión cerrada" ]] || [[ $line =~ "Error en conexión" ]]; then
             local addr=$(echo "$line" | grep -oP 'desde \K[^ ]+')
             local ip=$(echo "$addr" | cut -d: -f1)
             
-            if is_client_connection "$ip"; then
+            if is_client_connection "$ip" && [[ -n "${active_connections[$addr]}" ]]; then
                 local port=$(echo "$addr" | cut -d: -f2)
+                local duration=$(( $(date +%s) - $(date -d "${connection_data[$addr]}" +%s) ))
+                
+                # Notificación de desconexión
+                echo -e "\n${RED}[-] Desconexión de $ip:$port (duración: $(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60))))${NC}"
+                
                 unset active_connections["$addr"]
                 if [[ ${port_connections_count[$port]} -gt 0 ]]; then
                     ((port_connections_count[$port]--))
                 fi
+                unset connection_data["$addr"]
+                unset transfer_data["$addr"]
             fi
+        elif [[ $line =~ "bytes transferidos" ]]; then
+            local addr=$(echo "$line" | grep -oP 'desde \K[^ ]+')
+            local bytes=$(echo "$line" | grep -oP '\d+ bytes')
+            bytes=${bytes%% *}
+            transfer_data["$addr"]=$((${transfer_data["$addr"]:-0} + bytes))
         fi
     }
-
-    # Función para mostrar la tabla de conexiones
-    show_connections_table() {
-        echo -e "\n${BLUE}Conexiones de clientes activas:${NC}"
-        echo "╔════════════════════╦═══════════╦══════════════════╗"
-        echo "║     IP Cliente     ║  Puerto   ║ Tiempo Conectado ║"
-        echo "╠════════════════════╬═══════════╬══════════════════╣"
-        
-        local now=$(date +%s)
-        if [ ${#active_connections[@]} -eq 0 ]; then
-            printf "║%-62s║\n" "                   No hay conexiones activas                    "
-        else
-            for addr in "${!active_connections[@]}"; do
-                local ip=$(clean_address "$(echo "$addr" | cut -d: -f1)")
-                local port=$(clean_address "$(echo "$addr" | cut -d: -f2)")
-                local timestamp="${active_connections[$addr]}"
-                
-                local conn_time=$(date -d "$timestamp" +%s)
-                local duration=$((now - conn_time))
-                local duration_str=$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))
-                
-                printf "║ %-18s ║ %-9s ║ %-16s ║\n" "$ip" "$port" "$duration_str"
-            done
-        fi
-        
-        echo "╚════════════════════╩═══════════╩══════════════════╝"
-        echo -e "\n${GREEN}Total de conexiones de clientes activas: ${#active_connections[@]}${NC}"
-    }
-
-    # Verificar si el servicio está activo
-    if ! systemctl is-active --quiet $SERVICE_NAME; then
-        echo -e "${RED}El servicio WebSocket no está activo.${NC}"
-        return 1
-    fi
-
-    # Verificar si existe el archivo de log
-    if [ ! -f "$LOG_FILE" ]; then
-        echo -e "${RED}No se encuentra el archivo de log: $LOG_FILE${NC}"
-        return 1
-    fi
 
     # Inicializar el monitor
     show_header || return 1
 
-    # Cargar conexiones existentes iniciales
+    # Cargar conexiones existentes
     while read -r line; do
         process_log_line "$line"
     done < <(tail -n 1000 "$LOG_FILE")
     
     show_connections_table
 
-    # Usar coproc para tail -f
+    # Monitoreo en tiempo real
     coproc LOGGER { tail -f "$LOG_FILE"; }
 
     # Bucle principal
     while true; do
-        # Configurar lectura no bloqueante
         read -t 0.1 -n 1 key
-        if [[ "$key" == "0" ]]; then
-            kill $LOGGER_PID 2>/dev/null
-            echo -e "\n${GREEN}Saliendo del monitor...${NC}"
-            break
-        fi
-
-        # Leer y procesar logs si hay disponibles
-        if read -t 0.1 -u ${LOGGER[0]} line; then
-            process_log_line "$line"
-            show_header
-            show_connections_table
-        fi
+        case "$key" in
+            "0")
+                kill $LOGGER_PID 2>/dev/null
+                echo -e "\n${GREEN}Finalizando monitoreo...${NC}"
+                break
+                ;;
+            "r")
+                show_header
+                show_connections_table
+                ;;
+            *)
+                if read -t 0.1 -u ${LOGGER[0]} line; then
+                    process_log_line "$line"
+                    show_header
+                    show_connections_table
+                fi
+                ;;
+        esac
     done
 
-    # Limpiar
+    # Limpieza
     kill $LOGGER_PID 2>/dev/null
     wait $LOGGER_PID 2>/dev/null
     return 0
