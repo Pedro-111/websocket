@@ -9,235 +9,329 @@ import time
 import os
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from typing import List, Set, Optional
+from dataclasses import dataclass
 
-# Configuración de logging
-logging.basicConfig(filename='/tmp/proxy.log', level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+# Mejora en la configuración de logging
+logging.basicConfig(
+    filename='/tmp/proxy.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(threadName)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
-# Configuración de conexión
-IP = '0.0.0.0'
-try:
-    PORT = int(sys.argv[1])
-except (IndexError, ValueError):
-    PORT = 80
-PASS = os.environ.get('PROXY_PASS', '')  # Obtener contraseña desde variable de entorno
-BUFLEN = 8196 * 8
-TIMEOUT = 60
-MSG = 'WSS'
-COR = '<font color="null">'
-FTAG = '</font>'
-DEFAULT_HOST = '0.0.0.0:22'
-RESPONSE = f"HTTP/1.1 200 {COR}{MSG}{FTAG}\r\n\r\n"
+@dataclass
+class Config:
+    IP: str = '0.0.0.0'
+    PORT: int = 80
+    PASS: str = os.environ.get('PROXY_PASS', '')
+    BUFLEN: int = 8196 * 8
+    TIMEOUT: int = 60
+    MSG: str = 'WSS'
+    COR: str = '<font color="null">'
+    FTAG: str = '</font>'
+    DEFAULT_HOST: str = '0.0.0.0:22'
+    MAX_WORKERS: int = 100
+    
+    @property
+    def RESPONSE(self) -> str:
+        return f"HTTP/1.1 200 {self.COR}{self.MSG}{self.FTAG}\r\n\r\n"
+
+config = Config()
 
 class Server(threading.Thread):
-    def __init__(self, host, port):
+    def __init__(self, host: str, port: int):
         super().__init__()
-        self.running = False
-        self.host = host
-        self.port = port
-        self.threads = set()
-        self.threadsLock = threading.Lock()
-        self.logLock = threading.Lock()
-        self.threadpool = ThreadPoolExecutor(max_workers=100)  # Limitar conexiones simultáneas
+        self.running: bool = False
+        self.host: str = host
+        self.port: int = port
+        self.threads: Set = set()
+        self.threadsLock: threading.Lock = threading.Lock()
+        self.logLock: threading.Lock = threading.Lock()
+        self.threadpool = ThreadPoolExecutor(max_workers=config.MAX_WORKERS)
+        self.logger = logging.getLogger(f'Server-{port}')
+        self.sockets = []  # Lista para mantener los sockets IPv4 e IPv6
 
-    def run(self):
-        self.soc = socket.socket(socket.AF_INET)
-        self.soc.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.soc.settimeout(2)
-        self.soc.bind((self.host, self.port))
-        self.soc.listen(0)
-        self.running = True
-
+    def setup_socket(self) -> List[tuple]:
+        """Configura los sockets del servidor para IPv4 e IPv6"""
+        sockets = []
+        
+        # Configurar socket IPv4
         try:
+            soc_ipv4 = socket.socket(socket.AF_INET)
+            soc_ipv4.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            soc_ipv4.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            soc_ipv4.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            soc_ipv4.bind((self.host, self.port))
+            soc_ipv4.listen(socket.SOMAXCONN)
+            soc_ipv4.settimeout(2)
+            sockets.append(('IPv4', soc_ipv4))
+            self.logger.info(f"Socket IPv4 escuchando en puerto {self.port}")
+        except Exception as e:
+            self.logger.error(f"Error configurando socket IPv4: {e}")
+
+        # Configurar socket IPv6
+        try:
+            soc_ipv6 = socket.socket(socket.AF_INET6)
+            soc_ipv6.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            soc_ipv6.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            soc_ipv6.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            soc_ipv6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            soc_ipv6.bind(('::', self.port))
+            soc_ipv6.listen(socket.SOMAXCONN)
+            soc_ipv6.settimeout(2)
+            sockets.append(('IPv6', soc_ipv6))
+            self.logger.info(f"Socket IPv6 escuchando en puerto {self.port}")
+        except Exception as e:
+            self.logger.error(f"Error configurando socket IPv6: {e}")
+
+        return sockets
+
+    def run(self) -> None:
+        try:
+            self.sockets = self.setup_socket()
+            
+            if not self.sockets:
+                self.logger.error("No se pudo crear ningún socket")
+                return
+
+            self.running = True
+
             while self.running:
+                sockets_for_select = [s[1] for s in self.sockets]
                 try:
-                    c, addr = self.soc.accept()
-                    c.setblocking(1)
-                except socket.timeout:
+                    readable, _, _ = select.select(sockets_for_select, [], [], 2)
+                    
+                    for sock in readable:
+                        try:
+                            client, addr = sock.accept()
+                            client.setblocking(True)
+                            socket_type = 'IPv6' if ':' in str(addr[0]) else 'IPv4'
+                            self.logger.info(f"Nueva conexión {socket_type} desde {addr}")
+                            self.threadpool.submit(self.handle_connection, client, addr)
+                        except socket.timeout:
+                            continue
+                        except Exception as e:
+                            self.logger.error(f"Error en accept: {e}")
+                except select.error as e:
+                    self.logger.error(f"Error en select: {e}")
                     continue
-                
-                self.threadpool.submit(self.handle_connection, c, addr)
+                except Exception as e:
+                    self.logger.error(f"Error inesperado: {e}")
+                    continue
+
+        except Exception as e:
+            self.logger.error(f"Error en el servidor: {e}")
         finally:
-            self.running = False
-            self.soc.close()
-            
-    def handle_connection(self, c, addr):
-        conn = ConnectionHandler(c, self, addr)
-        self.addConn(conn)
-        conn.run()
-        self.removeConn(conn)
-            
-    def printLog(self, log):
-        logging.info(log)
-    
-    def addConn(self, conn):
+            self.cleanup()
+
+    def cleanup(self) -> None:
+        """Limpieza de recursos"""
+        self.running = False
+        
+        # Cerrar todos los sockets
+        if hasattr(self, 'sockets'):
+            for _, soc in self.sockets:
+                try:
+                    soc.close()
+                except Exception as e:
+                    self.logger.error(f"Error cerrando socket: {e}")
+        
+        # Limpiar conexiones
+        with self.threadsLock:
+            for conn in list(self.threads):
+                try:
+                    conn.close()
+                except Exception as e:
+                    self.logger.error(f"Error cerrando conexión: {e}")
+        
+        # Cerrar threadpool
+        try:
+            self.threadpool.shutdown(wait=True)
+        except Exception as e:
+            self.logger.error(f"Error cerrando threadpool: {e}")
+
+    def handle_connection(self, client: socket.socket, addr: tuple) -> None:
+        conn = ConnectionHandler(client, self, addr)
+        self.add_conn(conn)
+        try:
+            conn.run()
+        finally:
+            self.remove_conn(conn)
+
+    def add_conn(self, conn: 'ConnectionHandler') -> None:
         with self.threadsLock:
             if self.running:
                 self.threads.add(conn)
-                    
-    def removeConn(self, conn):
+
+    def remove_conn(self, conn: 'ConnectionHandler') -> None:
         with self.threadsLock:
-            self.threads.remove(conn)
-                
-    def close(self):
-        self.running = False
-        with self.threadsLock:
-            for c in list(self.threads):
-                c.close()
-        self.threadpool.shutdown(wait=True)
+            self.threads.discard(conn)
+
+    def log_message(self, message: str) -> None:
+        with self.logLock:
+            self.logger.info(message)
 
 class ConnectionHandler:
-    def __init__(self, socClient, server, addr):
-        self.clientClosed = False
-        self.targetClosed = True
-        self.client = socClient
-        self.client_buffer = b''
+    def __init__(self, client_socket: socket.socket, server: Server, addr: tuple):
+        self.client = client_socket
         self.server = server
-        self.log = f'Conexión: {addr}'
-
-    def close(self):
-        try:
-            if not self.clientClosed:
-                self.client.shutdown(socket.SHUT_RDWR)
-                self.client.close()
-        except:
-            pass
-        finally:
-            self.clientClosed = True
-            
-        try:
-            if not self.targetClosed:
-                self.target.shutdown(socket.SHUT_RDWR)
-                self.target.close()
-        except:
-            pass
-        finally:
-            self.targetClosed = True
-
-    def run(self):
-        try:
-            self.client_buffer = self.client.recv(BUFLEN)
+        self.client_buffer = bytearray()
+        self.target: Optional[socket.socket] = None
+        self.log = f'Conexión desde {addr}'
         
-            hostPort = self.findHeader(self.client_buffer.decode(), 'X-Real-Host')
-            
-            if hostPort == '':
-                hostPort = DEFAULT_HOST
+    def close(self) -> None:
+        """Cierra las conexiones de manera segura"""
+        for sock in (self.client, self.target):
+            if sock:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                    sock.close()
+                except Exception:
+                    pass
 
-            split = self.findHeader(self.client_buffer.decode(), 'X-Split')
+    def run(self) -> None:
+        try:
+            if not self.handle_initial_connection():
+                return
 
-            if split != '':
-                self.client.recv(BUFLEN)
+            self.server.log_message(f"Buffer recibido: {self.client_buffer.decode('utf-8', errors='ignore')}")
             
-            if hostPort != '':
-                passwd = self.findHeader(self.client_buffer.decode(), 'X-Pass')
-                
-                if len(PASS) != 0 and passwd == PASS:
-                    self.method_CONNECT(hostPort)
-                elif len(PASS) != 0 and passwd != PASS:
-                    self.client.send(b'HTTP/1.1 400 WrongPass!\r\n\r\n')
-                elif hostPort.startswith(IP):
-                    self.method_CONNECT(hostPort)
-                else:
-                    self.client.send(b'HTTP/1.1 403 Forbidden!\r\n\r\n')
-            else:
-                logging.warning('- No X-Real-Host!')
+            # Intentamos obtener el host de diferentes fuentes
+            host_port = (
+                self.get_header('X-Real-Host') or 
+                self.get_connect_host() or 
+                self.get_header('Host') or 
+                config.DEFAULT_HOST
+            )
+
+            if not host_port:
                 self.client.send(b'HTTP/1.1 400 NoXRealHost!\r\n\r\n')
+                return
+
+            if not self.authenticate_and_connect(host_port):
+                return
 
         except Exception as e:
             self.log += f' - error: {str(e)}'
-            self.server.printLog(self.log)
+            self.server.log_message(self.log)
         finally:
             self.close()
 
-    def findHeader(self, head, header):
-        aux = head.find(f'{header}: ')
-    
-        if aux == -1:
+    def handle_initial_connection(self) -> bool:
+        """Maneja la conexión inicial y lee el buffer del cliente"""
+        try:
+            data = self.client.recv(config.BUFLEN)
+            if not data:
+                return False
+            self.client_buffer = data
+            return True
+        except Exception as e:
+            self.server.log_message(f"Error en conexión inicial: {e}")
+            return False
+
+    def get_header(self, header: str) -> str:
+        """Obtiene el valor de un header específico"""
+        try:
+            headers = self.client_buffer.decode('utf-8', errors='ignore')
+            for line in headers.split('\r\n'):
+                if line.lower().startswith(f'{header.lower()}:'):
+                    return line.split(':', 1)[1].strip()
+            return ''
+        except Exception as e:
+            self.server.log_message(f"Error parsing header {header}: {e}")
             return ''
 
-        aux = head.find(':', aux)
-        head = head[aux+2:]
-        aux = head.find('\r\n')
-
-        if aux == -1:
+    def get_connect_host(self) -> str:
+        """Obtiene el host del método CONNECT"""
+        try:
+            request = self.client_buffer.decode('utf-8', errors='ignore')
+            first_line = request.split('\r\n')[0]
+            if first_line.startswith('CONNECT'):
+                parts = first_line.split()
+                if len(parts) >= 2:
+                    return parts[1].split()[0]
+            return ''
+        except Exception:
             return ''
 
-        return head[:aux]
+    def authenticate_and_connect(self, host_port: str) -> bool:
+        """Autentica la conexión y establece el túnel"""
+        try:
+            host_port = host_port.split()[0]
+            
+            if config.PASS:
+                if self.get_header('X-Pass') != config.PASS:
+                    self.client.send(b'HTTP/1.1 400 WrongPass!\r\n\r\n')
+                    return False
 
-    def connect_target(self, host):
-        i = host.find(':')
-        if i != -1:
-            port = int(host[i+1:])
-            host = host[:i]
-        else:
-            port = 443 if self.method == 'CONNECT' else 22
+            self.connect_target(host_port)
+            self.client.sendall(config.RESPONSE.encode())
+            self.server.log_message(self.log + f' - CONNECT {host_port}')
+            self.handle_tunnel()
+            return True
+        except Exception as e:
+            self.log += f' - Error en conexión: {str(e)}'
+            return False
 
-        (soc_family, soc_type, proto, _, address) = socket.getaddrinfo(host, port)[0]
+    def connect_target(self, host: str) -> None:
+        """Establece conexión con el objetivo"""
+        host, port = self.parse_host_port(host)
+        self.target = socket.create_connection((host, port), timeout=config.TIMEOUT)
+        self.target.setblocking(True)
 
-        self.target = socket.socket(soc_family, soc_type, proto)
-        self.targetClosed = False
-        self.target.connect(address)
+    @staticmethod
+    def parse_host_port(host_port: str) -> tuple:
+        """Parsea el host y puerto de la cadena de conexión"""
+        if ':' in host_port:
+            host, port = host_port.rsplit(':', 1)
+            return host, int(port)
+        return host_port, 22
 
-    def method_CONNECT(self, path):
-        self.log += f' - CONNECT {path}'
-        self.connect_target(path)
-        self.client.sendall(RESPONSE.encode())
-        self.client_buffer = b''
-        self.server.printLog(self.log)
-        self.doCONNECT()
-                    
-    def doCONNECT(self):
-        socs = [self.client, self.target]
-        count = 0
-        error = False
+    def handle_tunnel(self) -> None:
+        """Maneja el túnel de datos entre cliente y objetivo"""
         while True:
-            count += 1
-            recv, _, err = select.select(socs, [], socs, 3)
-            if err:
-                error = True
-            if recv:
-                for in_ in recv:
-                    try:
-                        data = in_.recv(BUFLEN)
-                        if data:
-                            if in_ is self.target:
-                                self.client.send(data)
-                            else:
-                                while data:
-                                    byte = self.target.send(data)
-                                    data = data[byte:]
+            readable, _, exceptional = select.select(
+                [self.client, self.target],
+                [],
+                [self.client, self.target],
+                config.TIMEOUT
+            )
 
-                            count = 0
-                        else:
-                            break
-                    except:
-                        error = True
-                        break
-            if count == TIMEOUT:
-                error = True
-
-            if error:
+            if exceptional:
                 break
 
-def main():
-    ports = [int(port) for port in sys.argv[1:]]
-    if not ports:
-        ports = [80]  # Puerto por defecto si no se especifica ninguno
-    
-    servers = []
-    for port in ports:
-        logging.info(f"Iniciando proxy en {IP}:{port}")
-        server = Server(IP, port)
-        server.start()
-        servers.append(server)
-    
+            for sock in readable:
+                try:
+                    data = sock.recv(config.BUFLEN)
+                    if not data:
+                        return
+                    
+                    if sock is self.target:
+                        self.client.sendall(data)
+                    else:
+                        self.target.sendall(data)
+                except Exception:
+                    return
+
+def main() -> None:
+    """Función principal que inicia el servidor proxy"""
     try:
+        ports = [int(port) for port in sys.argv[1:]] or [config.PORT]
+        servers: List[Server] = []
+
+        for port in ports:
+            server = Server(config.IP, port)
+            server.start()
+            servers.append(server)
+            logging.info(f"Servidor proxy iniciado en {config.IP}:{port}")
+
         while True:
-            time.sleep(2)
+            time.sleep(1)
     except KeyboardInterrupt:
-        logging.info('Deteniendo los servidores...')
+        logging.info('Deteniendo servidores...')
         for server in servers:
-            server.close()
+            server.cleanup()
 
 if __name__ == '__main__':
     main()
