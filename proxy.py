@@ -186,16 +186,20 @@ class ConnectionHandler:
         
     def close(self) -> None:
         """Cierra las conexiones de manera segura"""
-        # Registrar desconexión en el log
-        self.server.log_message(f"Desconexión desde {self.client_addr}")
-        
-        for sock in (self.client, self.target):
-            if sock:
-                try:
-                    sock.shutdown(socket.SHUT_RDWR)
-                    sock.close()
-                except Exception:
-                    pass
+        try:
+            # Registrar desconexión en el log
+            self.server.log_message(f"Cliente desconectado desde {self.client_addr}")
+            
+            for sock in (self.client, self.target):
+                if sock:
+                    try:
+                        sock.shutdown(socket.SHUT_RDWR)
+                        sock.close()
+                    except Exception:
+                        pass
+        except Exception as e:
+            self.server.log_message(f"Error al cerrar conexión de {self.client_addr}: {str(e)}")
+
 
     def run(self) -> None:
         try:
@@ -297,33 +301,44 @@ class ConnectionHandler:
 
     def handle_tunnel(self) -> None:
         """Maneja el túnel de datos entre cliente y objetivo"""
-        while True:
-            readable, _, exceptional = select.select(
-                [self.client, self.target],
-                [],
-                [self.client, self.target],
-                config.TIMEOUT
-            )
+        try:
+            while True:
+                readable, _, exceptional = select.select(
+                    [self.client, self.target],
+                    [],
+                    [self.client, self.target],
+                    config.TIMEOUT
+                )
 
-            if exceptional:
-                break
+                if exceptional:
+                    self.server.log_message(f"Error en la conexión con {self.client_addr}")
+                    break
 
-            for sock in readable:
-                try:
-                    data = sock.recv(config.BUFLEN)
-                    if not data:
+                if not readable:  # Timeout
+                    self.server.log_message(f"Timeout para {self.client_addr}")
+                    break
+
+                for sock in readable:
+                    try:
+                        data = sock.recv(config.BUFLEN)
+                        if not data:
+                            self.server.log_message(f"Conexión cerrada por {'cliente' if sock is self.client else 'destino'} {self.client_addr}")
+                            return
+                        
+                        if sock is self.target:
+                            self.client.sendall(data)
+                        else:
+                            self.target.sendall(data)
+                    except (ConnectionResetError, BrokenPipeError) as e:
+                        self.server.log_message(f"Conexión interrumpida para {self.client_addr}: {str(e)}")
                         return
-                    
-                    if sock is self.target:
-                        self.client.sendall(data)
-                        with connections_lock:
-                            active_connections[self.addr]['bytes_received'] += len(data)
-                    else:
-                        self.target.sendall(data)
-                        with connections_lock:
-                            active_connections[self.addr]['bytes_sent'] += len(data)
-                except Exception:
-                    return
+                    except Exception as e:
+                        self.server.log_message(f"Error en el túnel para {self.client_addr}: {str(e)}")
+                        return
+        except Exception as e:
+            self.server.log_message(f"Error en el manejo del túnel para {self.client_addr}: {str(e)}")
+        finally:
+            self.close()
 
 def main() -> None:
     """Función principal que inicia el servidor proxy"""
