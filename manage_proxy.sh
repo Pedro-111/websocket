@@ -538,8 +538,8 @@ show_statistics() {
     # Función para procesar cada línea del log
     process_log_line() {
         local line="$1"
-        if [[ $line =~ "Nueva conexión" ]]; then
-            local addr=$(echo "$line" | grep -oP 'desde \K[^ ]+')
+        if [[ $line =~ "client connected" ]]; then
+            local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
             local ip=$(echo "$addr" | cut -d: -f1)
             local port=$(echo "$addr" | cut -d: -f2)
             
@@ -550,18 +550,16 @@ show_statistics() {
                 connection_data["$addr"]="$timestamp"
                 transfer_data["$addr"]=0
                 
-                # Notificación de nueva conexión
                 echo -e "\n${GREEN}[+] Nueva conexión desde $ip:$port${NC}"
             fi
-        elif [[ $line =~ "Conexión cerrada" ]] || [[ $line =~ "Error en conexión" ]]; then
-            local addr=$(echo "$line" | grep -oP 'desde \K[^ ]+')
+        elif [[ $line =~ "client disconnected" ]]; then
+            local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
             local ip=$(echo "$addr" | cut -d: -f1)
             
             if is_client_connection "$ip" && [[ -n "${active_connections[$addr]}" ]]; then
                 local port=$(echo "$addr" | cut -d: -f2)
                 local duration=$(( $(date +%s) - $(date -d "${connection_data[$addr]}" +%s) ))
                 
-                # Notificación de desconexión
                 echo -e "\n${RED}[-] Desconexión de $ip:$port (duración: $(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60))))${NC}"
                 
                 unset active_connections["$addr"]
@@ -571,27 +569,22 @@ show_statistics() {
                 unset connection_data["$addr"]
                 unset transfer_data["$addr"]
             fi
-        elif [[ $line =~ "bytes transferidos" ]]; then
-            local addr=$(echo "$line" | grep -oP 'desde \K[^ ]+')
-            local bytes=$(echo "$line" | grep -oP '\d+ bytes')
-            bytes=${bytes%% *}
-            transfer_data["$addr"]=$((${transfer_data["$addr"]:-0} + bytes))
         fi
-    }
+    }    
 
-    # Inicializar el monitor
+   # Inicializar el monitor
     show_header || return 1
-
-    # Cargar conexiones existentes
-    while read -r line; do
+    
+    # Cargar conexiones existentes iniciales
+    journalctl -u hysteria -n 1000 --no-pager | while read -r line; do
         process_log_line "$line"
-    done < <(tail -n 1000 "$LOG_FILE")
+    done
     
     show_connections_table
-
+    
     # Monitoreo en tiempo real
-    coproc LOGGER { tail -f "$LOG_FILE"; }
-
+    coproc LOGGER { journalctl -u hysteria -f; }
+    
     # Bucle principal
     while true; do
         read -t 0.1 -n 1 key
