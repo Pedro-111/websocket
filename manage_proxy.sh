@@ -422,7 +422,7 @@ check_updates() {
     echo -e "${GREEN}No hay actualizaciones disponibles.${NC}"
     return 1
 }
-def monitor_connections() {
+monitor_connections() {
     echo -e "${BLUE}=== Monitor de Conexiones WebSocket en Tiempo Real ===${NC}"
     echo -e "${YELLOW}Presione Ctrl+C para salir${NC}\n"
     
