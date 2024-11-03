@@ -437,6 +437,58 @@ monitor_connections() {
             echo "$(( bytes / 1048576 ))MB"
         fi
     }
+
+    # Función para obtener conexiones activas
+    get_active_connections() {
+        local tempfile=$(mktemp)
+        local current_time=$(date +%s)
+        
+        # Procesar el archivo de log
+        tail -n 5000 "$LOG_FILE" | while IFS= read -r line; do
+            if echo "$line" | grep -q "Nueva conexión"; then
+                # Extraer IP y puerto
+                ip=$(echo "$line" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+" || echo "N/A")
+                timestamp=$(echo "$line" | awk '{print $1" "$2}')
+                echo "CONNECT $ip $timestamp" >> "$tempfile"
+            elif echo "$line" | grep -q "Desconexión desde"; then
+                # Extraer IP y puerto de la desconexión
+                ip=$(echo "$line" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+" || echo "N/A")
+                # Eliminar la conexión del archivo temporal
+                sed -i "/CONNECT $ip/d" "$tempfile"
+            fi
+        done
+        
+        # Mostrar conexiones activas
+        if [ -f "$tempfile" ]; then
+            while IFS= read -r line; do
+                ip=$(echo "$line" | awk '{print $2}')
+                timestamp=$(echo "$line" | awk '{print $3" "$4}')
+                
+                # Calcular tiempo de conexión
+                start_time=$(date -d "$timestamp" +%s)
+                elapsed=$((current_time - start_time))
+                
+                # Solo mostrar si la conexión tiene menos de 5 minutos de inactividad
+                if [ $elapsed -lt 300 ]; then
+                    printf "%-20s %-15s %-12s %-12s %-15s\n" \
+                        "$ip" \
+                        "$(get_destination_host "$ip")" \
+                        "$(bytes_to_human 0)" \
+                        "$(bytes_to_human 0)" \
+                        "$(printf '%02d:%02d:%02d' $((elapsed/3600)) $((elapsed%3600/60)) $((elapsed%60)))"
+                fi
+            done < "$tempfile"
+        fi
+        
+        rm -f "$tempfile"
+    }
+
+    # Función para obtener el host de destino
+    get_destination_host() {
+        local ip=$1
+        local host=$(grep -B 2 "CONNECT.*$ip" "$LOG_FILE" | grep "CONNECT" | tail -n 1 | awk '{print $NF}')
+        echo "${host:-N/A}"
+    }
     
     while true; do
         clear
@@ -447,25 +499,9 @@ monitor_connections() {
         echo "--------------------------------------------------------------------------------"
         
         if [ -f "$LOG_FILE" ]; then
-            # Obtener información de conexiones activas del log
-            tail -n 1000 "$LOG_FILE" | grep -i "nueva conexión" | while read -r line; do
-                ip=$(echo "$line" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+" || echo "N/A")
-                host=$(echo "$line" | grep -oE "CONNECT.*" | cut -d' ' -f2 || echo "N/A")
-                time_connected=$(echo "$line" | awk '{print $1" "$2}')
-                
-                # Calcular tiempo transcurrido
-                start_time=$(date -d "$time_connected" +%s)
-                current_time=$(date +%s)
-                elapsed=$((current_time - start_time))
-                
-                # Mostrar información formateada
-                printf "%-20s %-15s %-12s %-12s %-15s\n" \
-                    "$ip" \
-                    "$host" \
-                    "$(bytes_to_human 0)" \
-                    "$(bytes_to_human 0)" \
-                    "$(printf '%02d:%02d:%02d' $((elapsed/3600)) $((elapsed%3600/60)) $((elapsed%60)))"
-            done
+            get_active_connections
+        else
+            echo "No hay archivo de log disponible."
         fi
         
         echo -e "\n${YELLOW}Actualizando cada 2 segundos...${NC}"
