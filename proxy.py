@@ -180,27 +180,15 @@ class ConnectionHandler:
         self.server = server
         self.client_buffer = bytearray()
         self.target: Optional[socket.socket] = None
-        self.log = f'Conexión desde {addr}'
-        self.addr = addr
-        self.host_port = None
+        self.client_addr = f"{addr[0]}:{addr[1]}"
+        self.log = f'Conexión desde {self.client_addr}'
         self.connection_time = time.time()
-        
-        # Registrar conexión activa
-        with connections_lock:
-            active_connections[self.addr] = {
-                'time': self.connection_time,
-                'host': None,
-                'bytes_sent': 0,
-                'bytes_received': 0
-            }
         
     def close(self) -> None:
         """Cierra las conexiones de manera segura"""
-        # Eliminar conexión activa
-        with connections_lock:
-            if self.addr in active_connections:
-                del active_connections[self.addr]
-                
+        # Registrar desconexión en el log
+        self.server.log_message(f"Desconexión desde {self.client_addr}")
+        
         for sock in (self.client, self.target):
             if sock:
                 try:
@@ -214,21 +202,21 @@ class ConnectionHandler:
             if not self.handle_initial_connection():
                 return
 
-            self.server.log_message(f"Buffer recibido: {self.client_buffer.decode('utf-8', errors='ignore')}")
+            self.server.log_message(f"Buffer recibido de {self.client_addr}: {self.client_buffer.decode('utf-8', errors='ignore')}")
             
             # Intentamos obtener el host de diferentes fuentes
-            host_port = (
+            self.host_port = (
                 self.get_header('X-Real-Host') or 
                 self.get_connect_host() or 
                 self.get_header('Host') or 
                 config.DEFAULT_HOST
             )
 
-            if not host_port:
+            if not self.host_port:
                 self.client.send(b'HTTP/1.1 400 NoXRealHost!\r\n\r\n')
                 return
 
-            if not self.authenticate_and_connect(host_port):
+            if not self.authenticate_and_connect(self.host_port):
                 return
 
         except Exception as e:
