@@ -12,6 +12,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Set, Optional
 from dataclasses import dataclass
 
+active_connections = {}
+connections_lock = threading.Lock()
 # Mejora en la configuración de logging
 logging.basicConfig(
     filename='/tmp/proxy.log',
@@ -179,9 +181,26 @@ class ConnectionHandler:
         self.client_buffer = bytearray()
         self.target: Optional[socket.socket] = None
         self.log = f'Conexión desde {addr}'
+        self.addr = addr
+        self.host_port = None
+        self.connection_time = time.time()
+        
+        # Registrar conexión activa
+        with connections_lock:
+            active_connections[self.addr] = {
+                'time': self.connection_time,
+                'host': None,
+                'bytes_sent': 0,
+                'bytes_received': 0
+            }
         
     def close(self) -> None:
         """Cierra las conexiones de manera segura"""
+        # Eliminar conexión activa
+        with connections_lock:
+            if self.addr in active_connections:
+                del active_connections[self.addr]
+                
         for sock in (self.client, self.target):
             if sock:
                 try:
@@ -309,8 +328,12 @@ class ConnectionHandler:
                     
                     if sock is self.target:
                         self.client.sendall(data)
+                        with connections_lock:
+                            active_connections[self.addr]['bytes_received'] += len(data)
                     else:
                         self.target.sendall(data)
+                        with connections_lock:
+                            active_connections[self.addr]['bytes_sent'] += len(data)
                 except Exception:
                     return
 
