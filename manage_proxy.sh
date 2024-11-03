@@ -422,74 +422,18 @@ check_updates() {
     echo -e "${GREEN}No hay actualizaciones disponibles.${NC}"
     return 1
 }
-monitor_connections() {
+def monitor_connections() {
     echo -e "${BLUE}=== Monitor de Conexiones WebSocket en Tiempo Real ===${NC}"
     echo -e "${YELLOW}Presione Ctrl+C para salir${NC}\n"
     
-    # Función para convertir bytes a formato legible
-    bytes_to_human() {
-        local bytes=$1
-        if [ $bytes -lt 1024 ]; then
-            echo "${bytes}B"
-        elif [ $bytes -lt 1048576 ]; then
-            echo "$(( bytes / 1024 ))KB"
-        else
-            echo "$(( bytes / 1048576 ))MB"
-        fi
-    }
-
-    # Función para obtener conexiones activas
-    get_active_connections() {
-        local tempfile=$(mktemp)
-        local current_time=$(date +%s)
-        
-        # Procesar el archivo de log
-        tail -n 5000 "$LOG_FILE" | while IFS= read -r line; do
-            if echo "$line" | grep -q "Nueva conexión"; then
-                # Extraer IP y puerto
-                ip=$(echo "$line" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+" || echo "N/A")
-                timestamp=$(echo "$line" | awk '{print $1" "$2}')
-                echo "CONNECT $ip $timestamp" >> "$tempfile"
-            elif echo "$line" | grep -q "Desconexión desde"; then
-                # Extraer IP y puerto de la desconexión
-                ip=$(echo "$line" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+" || echo "N/A")
-                # Eliminar la conexión del archivo temporal
-                sed -i "/CONNECT $ip/d" "$tempfile"
-            fi
-        done
-        
-        # Mostrar conexiones activas
-        if [ -f "$tempfile" ]; then
-            while IFS= read -r line; do
-                ip=$(echo "$line" | awk '{print $2}')
-                timestamp=$(echo "$line" | awk '{print $3" "$4}')
-                
-                # Calcular tiempo de conexión
-                start_time=$(date -d "$timestamp" +%s)
-                elapsed=$((current_time - start_time))
-                
-                # Solo mostrar si la conexión tiene menos de 5 minutos de inactividad
-                if [ $elapsed -lt 300 ]; then
-                    printf "%-20s %-15s %-12s %-12s %-15s\n" \
-                        "$ip" \
-                        "$(get_destination_host "$ip")" \
-                        "$(bytes_to_human 0)" \
-                        "$(bytes_to_human 0)" \
-                        "$(printf '%02d:%02d:%02d' $((elapsed/3600)) $((elapsed%3600/60)) $((elapsed%60)))"
-                fi
-            done < "$tempfile"
-        fi
-        
-        rm -f "$tempfile"
-    }
-
-    # Función para obtener el host de destino
-    get_destination_host() {
+    # Función para verificar si una conexión está realmente activa
+    check_active_connection() {
         local ip=$1
-        local host=$(grep -B 2 "CONNECT.*$ip" "$LOG_FILE" | grep "CONNECT" | tail -n 1 | awk '{print $NF}')
-        echo "${host:-N/A}"
+        local port=$2
+        netstat -tnp 2>/dev/null | grep -q "$ip:$port"
+        return $?
     }
-    
+
     while true; do
         clear
         echo -e "${BLUE}=== Monitor de Conexiones WebSocket ===${NC}"
@@ -499,12 +443,38 @@ monitor_connections() {
         echo "--------------------------------------------------------------------------------"
         
         if [ -f "$LOG_FILE" ]; then
-            get_active_connections
+            # Crear un archivo temporal para las conexiones activas
+            TEMP_FILE=$(mktemp)
+            
+            # Obtener las conexiones activas usando netstat
+            netstat -tn | grep ESTABLISHED | grep ":$(grep ExecStart "$SERVICE_FILE" | grep -o '[0-9]\+' | tr '\n' '|' | sed 's/|$//')" | while read line; do
+                remote_addr=$(echo $line | awk '{print $5}')
+                local_port=$(echo $line | awk '{print $4}' | cut -d: -f2)
+                
+                # Buscar información adicional en el log
+                connect_time=$(grep "Nueva conexión.*$remote_addr" "$LOG_FILE" | tail -n1 | awk '{print $1" "$2}')
+                if [ ! -z "$connect_time" ]; then
+                    start_time=$(date -d "$connect_time" +%s)
+                    current_time=$(date +%s)
+                    duration=$((current_time - start_time))
+                    
+                    # Solo mostrar si la duración es menor a 5 minutos (300 segundos)
+                    if [ $duration -lt 300 ]; then
+                        printf "%-20s %-15s %-12s %-12s %-15s\n" \
+                            "$remote_addr" \
+                            "Puerto $local_port" \
+                            "-" \
+                            "-" \
+                            "$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))"
+                    fi
+                fi
+            done
+            
+            rm -f "$TEMP_FILE"
         else
-            echo "No hay archivo de log disponible."
+            echo "No hay conexiones activas"
         fi
         
-        echo -e "\n${YELLOW}Actualizando cada 2 segundos...${NC}"
         sleep 2
     done
 }
