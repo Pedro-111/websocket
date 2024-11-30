@@ -16,7 +16,7 @@ active_connections = {}
 connections_lock = threading.Lock()
 # Mejora en la configuración de logging
 logging.basicConfig(
-    filename='/tmp/proxy.log',
+    filename='/var/tmp/proxy.log',
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(threadName)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
