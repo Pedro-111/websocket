@@ -8,16 +8,12 @@ import sys
 import time
 import os
 import logging
-import ssl
-import subprocess
-import base64
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Set, Optional, Tuple
+from typing import List, Set, Optional
 from dataclasses import dataclass
 
 active_connections = {}
 connections_lock = threading.Lock()
-
 # Mejora en la configuración de logging
 logging.basicConfig(
     filename='/var/tmp/proxy.log',
@@ -29,6 +25,7 @@ logging.basicConfig(
 @dataclass
 class Config:
     IP: str = '0.0.0.0'
+    PORT: int = 80
     PASS: str = os.environ.get('PROXY_PASS', '')
     BUFLEN: int = 8196 * 8
     TIMEOUT: int = 60
@@ -37,34 +34,19 @@ class Config:
     FTAG: str = '</font>'
     DEFAULT_HOST: str = '0.0.0.0:22'
     MAX_WORKERS: int = 100
-    CERTFILE: str = 'cert.pem'
-    KEYFILE: str = 'key.pem'
-
+    
     @property
     def RESPONSE(self) -> str:
         return f"HTTP/1.1 200 {self.COR}{self.MSG}{self.FTAG}\r\n\r\n"
 
 config = Config()
 
-def generate_ssl_certificates():
-    """Genera certificados SSL si no existen"""
-    if not os.path.exists(config.CERTFILE) or not os.path.exists(config.KEYFILE):
-        logging.info("Generando certificados SSL...")
-        subprocess.run([
-            'openssl', 'req', '-x509', '-newkey', 'rsa:4096',
-            '-keyout', config.KEYFILE, '-out', config.CERTFILE,
-            '-days', '365', '-nodes', '-subj', '/CN=localhost'
-        ], check=True)
-        logging.info("Certificados SSL generados.")
-
 class Server(threading.Thread):
-    def __init__(self, host: str, port: int, use_ssl: bool = False, auth: Optional[Tuple[str, str]] = None):
+    def __init__(self, host: str, port: int):
         super().__init__()
         self.running: bool = False
         self.host: str = host
         self.port: int = port
-        self.use_ssl: bool = use_ssl
-        self.auth: Optional[Tuple[str, str]] = auth
         self.threads: Set = set()
         self.threadsLock: threading.Lock = threading.Lock()
         self.logLock: threading.Lock = threading.Lock()
@@ -75,7 +57,7 @@ class Server(threading.Thread):
     def setup_socket(self) -> List[tuple]:
         """Configura los sockets del servidor para IPv4 e IPv6"""
         sockets = []
-
+        
         # Configurar socket IPv4
         try:
             soc_ipv4 = socket.socket(socket.AF_INET)
@@ -85,14 +67,8 @@ class Server(threading.Thread):
             soc_ipv4.bind((self.host, self.port))
             soc_ipv4.listen(socket.SOMAXCONN)
             soc_ipv4.settimeout(2)
-
-            if self.use_ssl:
-                context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-                context.load_cert_chain(certfile=config.CERTFILE, keyfile=config.KEYFILE)
-                soc_ipv4 = context.wrap_socket(soc_ipv4, server_side=True)
-
             sockets.append(('IPv4', soc_ipv4))
-            self.logger.info(f"Socket IPv4 escuchando en puerto {self.port} {'con SSL' if self.use_ssl else ''}")
+            self.logger.info(f"Socket IPv4 escuchando en puerto {self.port}")
         except Exception as e:
             self.logger.error(f"Error configurando socket IPv4: {e}")
 
@@ -106,14 +82,8 @@ class Server(threading.Thread):
             soc_ipv6.bind(('::', self.port))
             soc_ipv6.listen(socket.SOMAXCONN)
             soc_ipv6.settimeout(2)
-
-            if self.use_ssl:
-                context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-                context.load_cert_chain(certfile=config.CERTFILE, keyfile=config.KEYFILE)
-                soc_ipv6 = context.wrap_socket(soc_ipv6, server_side=True)
-
             sockets.append(('IPv6', soc_ipv6))
-            self.logger.info(f"Socket IPv6 escuchando en puerto {self.port} {'con SSL' if self.use_ssl else ''}")
+            self.logger.info(f"Socket IPv6 escuchando en puerto {self.port}")
         except Exception as e:
             self.logger.error(f"Error configurando socket IPv6: {e}")
 
@@ -122,7 +92,7 @@ class Server(threading.Thread):
     def run(self) -> None:
         try:
             self.sockets = self.setup_socket()
-
+            
             if not self.sockets:
                 self.logger.error("No se pudo crear ningún socket")
                 return
@@ -133,7 +103,7 @@ class Server(threading.Thread):
                 sockets_for_select = [s[1] for s in self.sockets]
                 try:
                     readable, _, _ = select.select(sockets_for_select, [], [], 2)
-
+                    
                     for sock in readable:
                         try:
                             client, addr = sock.accept()
@@ -160,7 +130,7 @@ class Server(threading.Thread):
     def cleanup(self) -> None:
         """Limpieza de recursos"""
         self.running = False
-
+        
         # Cerrar todos los sockets
         if hasattr(self, 'sockets'):
             for _, soc in self.sockets:
@@ -168,7 +138,7 @@ class Server(threading.Thread):
                     soc.close()
                 except Exception as e:
                     self.logger.error(f"Error cerrando socket: {e}")
-
+        
         # Limpiar conexiones
         with self.threadsLock:
             for conn in list(self.threads):
@@ -176,7 +146,7 @@ class Server(threading.Thread):
                     conn.close()
                 except Exception as e:
                     self.logger.error(f"Error cerrando conexión: {e}")
-
+        
         # Cerrar threadpool
         try:
             self.threadpool.shutdown(wait=True)
@@ -187,9 +157,6 @@ class Server(threading.Thread):
         conn = ConnectionHandler(client, self, addr)
         self.add_conn(conn)
         try:
-            if not self.authenticate(conn.get_headers()):
-                client.send(b'HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Proxy"\r\n\r\n')
-                return
             conn.run()
         finally:
             self.remove_conn(conn)
@@ -207,20 +174,6 @@ class Server(threading.Thread):
         with self.logLock:
             self.logger.info(message)
 
-    def authenticate(self, headers: str) -> bool:
-        if not self.auth:
-            return True
-
-        auth_header = headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Basic '):
-            return False
-
-        encoded_credentials = auth_header.split(' ')[1]
-        decoded_credentials = base64.b64decode(encoded_credentials).decode('utf-8')
-        username, password = decoded_credentials.split(':')
-
-        return username == self.auth[0] and password == self.auth[1]
-
 class ConnectionHandler:
     def __init__(self, client_socket: socket.socket, server: Server, addr: tuple):
         self.client = client_socket
@@ -230,13 +183,13 @@ class ConnectionHandler:
         self.client_addr = f"{addr[0]}:{addr[1]}"
         self.log = f'Conexión desde {self.client_addr}'
         self.connection_time = time.time()
-
+        
     def close(self) -> None:
         """Cierra las conexiones de manera segura"""
         try:
             # Registrar desconexión en el log
             self.server.log_message(f"Cliente desconectado desde {self.client_addr}")
-
+            
             for sock in (self.client, self.target):
                 if sock:
                     try:
@@ -247,18 +200,19 @@ class ConnectionHandler:
         except Exception as e:
             self.server.log_message(f"Error al cerrar conexión de {self.client_addr}: {str(e)}")
 
+
     def run(self) -> None:
         try:
             if not self.handle_initial_connection():
                 return
 
             self.server.log_message(f"Buffer recibido de {self.client_addr}: {self.client_buffer.decode('utf-8', errors='ignore')}")
-
+            
             # Intentamos obtener el host de diferentes fuentes
             self.host_port = (
-                self.get_header('X-Real-Host') or
-                self.get_connect_host() or
-                self.get_header('Host') or
+                self.get_header('X-Real-Host') or 
+                self.get_connect_host() or 
+                self.get_header('Host') or 
                 config.DEFAULT_HOST
             )
 
@@ -287,24 +241,17 @@ class ConnectionHandler:
             self.server.log_message(f"Error en conexión inicial: {e}")
             return False
 
-    def get_headers(self) -> dict:
-        """Obtiene los encabezados de la solicitud HTTP"""
-        headers = {}
-        try:
-            headers_raw = self.client_buffer.decode('utf-8', errors='ignore')
-            for line in headers_raw.split('\r\n'):
-                if ': ' in line:
-                    key, value = line.split(': ', 1)
-                    headers[key] = value
-            return headers
-        except Exception as e:
-            self.server.log_message(f"Error parsing headers: {e}")
-            return {}
-
     def get_header(self, header: str) -> str:
         """Obtiene el valor de un header específico"""
-        headers = self.get_headers()
-        return headers.get(header, '')
+        try:
+            headers = self.client_buffer.decode('utf-8', errors='ignore')
+            for line in headers.split('\r\n'):
+                if line.lower().startswith(f'{header.lower()}:'):
+                    return line.split(':', 1)[1].strip()
+            return ''
+        except Exception as e:
+            self.server.log_message(f"Error parsing header {header}: {e}")
+            return ''
 
     def get_connect_host(self) -> str:
         """Obtiene el host del método CONNECT"""
@@ -323,7 +270,7 @@ class ConnectionHandler:
         """Autentica la conexión y establece el túnel"""
         try:
             host_port = host_port.split()[0]
-
+            
             if config.PASS:
                 if self.get_header('X-Pass') != config.PASS:
                     self.client.send(b'HTTP/1.1 400 WrongPass!\r\n\r\n')
@@ -377,7 +324,7 @@ class ConnectionHandler:
                         if not data:
                             self.server.log_message(f"Conexión cerrada por {'cliente' if sock is self.client else 'destino'} {self.client_addr}")
                             return
-
+                        
                         if sock is self.target:
                             self.client.sendall(data)
                         else:
@@ -396,33 +343,14 @@ class ConnectionHandler:
 def main() -> None:
     """Función principal que inicia el servidor proxy"""
     try:
-        # Generar certificados SSL si no existen
-        generate_ssl_certificates()
-
-        # Parsear los argumentos de la línea de comandos
-        port_configs: List[Tuple[int, bool]] = []
-        auth = None
-        for arg in sys.argv[1:]:
-            if arg.startswith('auth='):
-                auth = tuple(arg.split('=')[1].split(':'))
-            elif ':' in arg:
-                port, ssl_config = arg.split(':')
-                port = int(port)
-                use_ssl = ssl_config.split('=')[1].lower() == 'true'
-                port_configs.append((port, use_ssl))
-            else:
-                port_configs.append((int(arg), False))
-
-        if not port_configs:
-            port_configs = [(config.PORT, False), (config.SSL_PORT, True)]
-
+        ports = [int(port) for port in sys.argv[1:]] or [config.PORT]
         servers: List[Server] = []
 
-        for port, use_ssl in port_configs:
-            server = Server(config.IP, port, use_ssl, auth)
+        for port in ports:
+            server = Server(config.IP, port)
             server.start()
             servers.append(server)
-            logging.info(f"Servidor proxy iniciado en {config.IP}:{port} {'con SSL' if use_ssl else ''}")
+            logging.info(f"Servidor proxy iniciado en {config.IP}:{port}")
 
         while True:
             time.sleep(1)
