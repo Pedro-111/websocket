@@ -34,7 +34,7 @@ run_as_root() {
 # Verificación inicial del sistema
 check_system_requirements() {
     echo "Verificando requisitos del sistema..."
-    
+
     # Verificar systemd
     if ! command -v systemctl &> /dev/null; then
         handle_error "systemctl no está disponible. Este script requiere systemd."
@@ -63,7 +63,7 @@ check_system_requirements() {
 # Función mejorada para descargar el script proxy
 download_proxy_script() {
     echo -e "${BLUE}Descargando la última versión de proxy.py...${NC}"
-    
+
     # Crear backup si existe una versión anterior
     if [ -f "$PROXY_PATH" ]; then
         local backup_file="$BACKUP_DIR/proxy.py.backup.$(date +%Y%m%d_%H%M%S)"
@@ -90,7 +90,7 @@ download_proxy_script() {
 create_service() {
     local ports=$1
     echo -e "${BLUE}Creando archivo de servicio con puertos: $ports${NC}"
-    
+
     # Validar puertos
     for port in $ports; do
         if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
@@ -128,7 +128,7 @@ EOF
     run_as_root systemctl daemon-reload
     run_as_root systemctl enable $SERVICE_NAME
     run_as_root systemctl start $SERVICE_NAME
-    
+
     # Verificar estado del servicio
     if ! systemctl is-active --quiet $SERVICE_NAME; then
         handle_error "El servicio no se pudo iniciar correctamente."
@@ -140,7 +140,7 @@ EOF
 # Función mejorada para abrir puertos
 open_port() {
     check_proxy_script
-    
+
     echo -e "${YELLOW}Ingrese los puertos para el WebSocket (separados por espacios):${NC}"
     read -r new_ports
 
@@ -161,15 +161,15 @@ open_port() {
     if [ -f "$SERVICE_FILE" ]; then
         current_ports=$(run_as_root grep ExecStart "$SERVICE_FILE" | awk '{for(i=NF;i>0;i--) if($i ~ /^[0-9]+$/) print $i}')
         all_ports=$(echo "$current_ports $new_ports" | tr ' ' '\n' | sort -u | tr '\n' ' ')
-        
+
         if [ "$all_ports" = "$current_ports" ]; then
             echo -e "${YELLOW}No se han añadido nuevos puertos. Los puertos solicitados ya están en uso.${NC}"
             return 0
         fi
-        
+
         # Crear backup del archivo de servicio
         run_as_root cp "$SERVICE_FILE" "$BACKUP_DIR/service.backup.$(date +%Y%m%d_%H%M%S)"
-        
+
         run_as_root sed -i "s|ExecStart=.*|ExecStart=$(which python3) $PROXY_PATH $all_ports|" "$SERVICE_FILE"
     else
         create_service "$new_ports"
@@ -233,7 +233,7 @@ close_port() {
 # Función mejorada para actualizar scripts
 update_script() {
     echo -e "${BLUE}Iniciando proceso de actualización...${NC}"
-    
+
     # Crear backups
     if [ -f "$PROXY_PATH" ]; then
         run_as_root cp "$PROXY_PATH" "$BACKUP_DIR/proxy.py.backup.$(date +%Y%m%d_%H%M%S)"
@@ -252,18 +252,18 @@ update_script() {
         handle_error "Error al descargar manage_proxy.sh"
         return 1
     fi
-    
+
     if [ -f "$TEMP_SCRIPT" ]; then
         run_as_root mv "$TEMP_SCRIPT" "$0"
         run_as_root chmod +x "$0"
         echo -e "${GREEN}manage_proxy.sh actualizado.${NC}"
-        
+
         # Reiniciar el servicio si está activo
         if systemctl is-active --quiet $SERVICE_NAME; then
             run_as_root systemctl restart $SERVICE_NAME
             echo -e "${GREEN}Servicio reiniciado con la nueva versión de los scripts.${NC}"
         fi
-        
+
         echo -e "${YELLOW}Por favor, reinicie el script para aplicar los cambios.${NC}"
         exit 0
     else
@@ -279,7 +279,7 @@ uninstall_script() {
     # Crear backup final antes de desinstalar
     local backup_timestamp=$(date +%Y%m%d_%H%M%S)
     run_as_root mkdir -p "$BACKUP_DIR/uninstall_$backup_timestamp"
-    
+
     if [ -f "$PROXY_PATH" ]; then
         run_as_root cp "$PROXY_PATH" "$BACKUP_DIR/uninstall_$backup_timestamp/"
     fi
@@ -323,10 +323,10 @@ view_open_ports() {
     echo -e "${BLUE}=== Estado de Puertos WebSocket ===${NC}"
     printf "%-10s %-15s %-20s\n" "Puerto" "Estado" "Conexiones"
     echo "------------------------------------------------"
-    
+
     current_ports=$(run_as_root grep ExecStart "$SERVICE_FILE" | awk '{for(i=NF;i>0;i--) if($i ~ /^[0-9]+$/) print $i}')
     service_status=$(systemctl is-active $SERVICE_NAME)
-    
+
     if [ -z "$current_ports" ]; then
         echo "No se encontraron puertos configurados."
     else
@@ -341,10 +341,10 @@ view_open_ports() {
             printf "%-10s %-15b %-20s\n" "$port" "$status" "$connections"
         done
     fi
-    
+
     echo "------------------------------------------------"
     echo -e "Estado del servicio: ${BLUE}$service_status${NC}"
-    
+
     # Mostrar uso de memoria y CPU
     if [ "$service_status" = "active" ]; then
         echo -e "\nUso de recursos:"
@@ -365,9 +365,9 @@ view_logs() {
     echo "2. Ver logs en tiempo real"
     echo "3. Buscar en logs"
     echo "4. Volver al menú principal"
-    
+
     read -p "Seleccione una opción: " log_choice
-    
+
     case $log_choice in
         1)
             echo -e "${YELLOW}Últimas 20 líneas del log:${NC}"
@@ -403,11 +403,10 @@ confirm() {
     done
 }
 
-
 # Nueva función para verificar actualizaciones
 check_updates() {
     echo -e "${BLUE}Verificando actualizaciones...${NC}"
-    
+
     # Verificar proxy.py
     TEMP_FILE="/tmp/proxy.py.tmp"
     if curl -sSL "$GITHUB_RAW_URL" -o "$TEMP_FILE"; then
@@ -418,14 +417,15 @@ check_updates() {
             fi
         fi
     fi
-    
+
     echo -e "${GREEN}No hay actualizaciones disponibles.${NC}"
     return 1
 }
+
 monitor_connections() {
     echo -e "${BLUE}=== Monitor de Conexiones WebSocket en Tiempo Real ===${NC}"
     echo -e "${YELLOW}Presione Ctrl+C para salir${NC}\n"
-    
+
     # Función para verificar si una conexión está realmente activa
     check_active_connection() {
         local ip=$1
@@ -441,23 +441,23 @@ monitor_connections() {
         echo -e "\n${GREEN}Conexiones activas:${NC}"
         printf "%-20s %-15s %-12s %-12s %-15s\n" "IP:Puerto" "Host Destino" "Enviado" "Recibido" "Tiempo Conexión"
         echo "--------------------------------------------------------------------------------"
-        
+
         if [ -f "$LOG_FILE" ]; then
             # Crear un archivo temporal para las conexiones activas
             TEMP_FILE=$(mktemp)
-            
+
             # Obtener las conexiones activas usando netstat
             netstat -tn | grep ESTABLISHED | grep ":$(grep ExecStart "$SERVICE_FILE" | grep -o '[0-9]\+' | tr '\n' '|' | sed 's/|$//')" | while read line; do
                 remote_addr=$(echo $line | awk '{print $5}')
                 local_port=$(echo $line | awk '{print $4}' | cut -d: -f2)
-                
+
                 # Buscar información adicional en el log
                 connect_time=$(grep "Nueva conexión.*$remote_addr" "$LOG_FILE" | tail -n1 | awk '{print $1" "$2}')
                 if [ ! -z "$connect_time" ]; then
                     start_time=$(date -d "$connect_time" +%s)
                     current_time=$(date +%s)
                     duration=$((current_time - start_time))
-                    
+
                     # Solo mostrar si la duración es menor a 5 minutos (300 segundos)
                     if [ $duration -lt 300 ]; then
                         printf "%-20s %-15s %-12s %-12s %-15s\n" \
@@ -469,15 +469,16 @@ monitor_connections() {
                     fi
                 fi
             done
-            
+
             rm -f "$TEMP_FILE"
         else
             echo "No hay conexiones activas"
         fi
-        
+
         sleep 2
     done
 }
+
 # Función principal mejorada
 main() {
     # Verificar que se ejecute como root
@@ -500,7 +501,7 @@ main() {
         echo "7. Verificar actualizaciones"
         echo "8. Desinstalar"
         echo "0. Salir"
-        
+
         read -p "Seleccione una opción: " choice
 
         case $choice in
@@ -512,9 +513,9 @@ main() {
             6) monitor_connections ;;
             7) check_updates ;;
             8) uninstall_script ;;
-            0) 
+            0)
                 echo -e "${GREEN}¡Hasta luego!${NC}"
-                exit 0 
+                exit 0
                 ;;
             *)
                 echo -e "${RED}Opción inválida${NC}"
