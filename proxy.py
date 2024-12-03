@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # encoding: utf-8
-
 import socket
 import threading
 import select
@@ -8,12 +7,15 @@ import sys
 import time
 import os
 import logging
+import ssl
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Set, Optional
+from typing import List, Set, Optional, Tuple
 from dataclasses import dataclass
 
 active_connections = {}
 connections_lock = threading.Lock()
+
 # Mejora en la configuración de logging
 logging.basicConfig(
     filename='/var/tmp/proxy.log',
@@ -25,8 +27,6 @@ logging.basicConfig(
 @dataclass
 class Config:
     IP: str = '0.0.0.0'
-    PORT: int = 80
-    PASS: str = os.environ.get('PROXY_PASS', '')
     BUFLEN: int = 8196 * 8
     TIMEOUT: int = 60
     MSG: str = 'WSS'
@@ -34,19 +34,33 @@ class Config:
     FTAG: str = '</font>'
     DEFAULT_HOST: str = '0.0.0.0:22'
     MAX_WORKERS: int = 100
-    
+    CERTFILE: str = 'cert.pem'
+    KEYFILE: str = 'key.pem'
+
     @property
     def RESPONSE(self) -> str:
         return f"HTTP/1.1 200 {self.COR}{self.MSG}{self.FTAG}\r\n\r\n"
 
 config = Config()
 
+def generate_ssl_certificates():
+    """Genera certificados SSL si no existen"""
+    if not os.path.exists(config.CERTFILE) or not os.path.exists(config.KEYFILE):
+        logging.info("Generando certificados SSL...")
+        subprocess.run([
+            'openssl', 'req', '-x509', '-newkey', 'rsa:4096',
+            '-keyout', config.KEYFILE, '-out', config.CERTFILE,
+            '-days', '365', '-nodes', '-subj', '/CN=localhost'
+        ], check=True)
+        logging.info("Certificados SSL generados.")
+
 class Server(threading.Thread):
-    def __init__(self, host: str, port: int):
+    def __init__(self, host: str, port: int, use_ssl: bool = False):
         super().__init__()
         self.running: bool = False
         self.host: str = host
         self.port: int = port
+        self.use_ssl: bool = use_ssl
         self.threads: Set = set()
         self.threadsLock: threading.Lock = threading.Lock()
         self.logLock: threading.Lock = threading.Lock()
@@ -57,24 +71,30 @@ class Server(threading.Thread):
     def setup_socket(self) -> List[tuple]:
         """Configura los sockets del servidor para IPv4 e IPv6"""
         sockets = []
-        
+
         # Configurar socket IPv4
         try:
-            soc_ipv4 = socket.socket(socket.AF_INET)
+            soc_ipv4 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             soc_ipv4.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             soc_ipv4.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             soc_ipv4.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             soc_ipv4.bind((self.host, self.port))
             soc_ipv4.listen(socket.SOMAXCONN)
             soc_ipv4.settimeout(2)
+
+            if self.use_ssl:
+                context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+                context.load_cert_chain(certfile=config.CERTFILE, keyfile=config.KEYFILE)
+                soc_ipv4 = context.wrap_socket(soc_ipv4, server_side=True)
+
             sockets.append(('IPv4', soc_ipv4))
-            self.logger.info(f"Socket IPv4 escuchando en puerto {self.port}")
+            self.logger.info(f"Socket IPv4 escuchando en puerto {self.port} {'con SSL' if self.use_ssl else ''}")
         except Exception as e:
             self.logger.error(f"Error configurando socket IPv4: {e}")
 
         # Configurar socket IPv6
         try:
-            soc_ipv6 = socket.socket(socket.AF_INET6)
+            soc_ipv6 = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
             soc_ipv6.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             soc_ipv6.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             soc_ipv6.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -82,8 +102,14 @@ class Server(threading.Thread):
             soc_ipv6.bind(('::', self.port))
             soc_ipv6.listen(socket.SOMAXCONN)
             soc_ipv6.settimeout(2)
+
+            if self.use_ssl:
+                context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+                context.load_cert_chain(certfile=config.CERTFILE, keyfile=config.KEYFILE)
+                soc_ipv6 = context.wrap_socket(soc_ipv6, server_side=True)
+
             sockets.append(('IPv6', soc_ipv6))
-            self.logger.info(f"Socket IPv6 escuchando en puerto {self.port}")
+            self.logger.info(f"Socket IPv6 escuchando en puerto {self.port} {'con SSL' if self.use_ssl else ''}")
         except Exception as e:
             self.logger.error(f"Error configurando socket IPv6: {e}")
 
@@ -92,7 +118,7 @@ class Server(threading.Thread):
     def run(self) -> None:
         try:
             self.sockets = self.setup_socket()
-            
+
             if not self.sockets:
                 self.logger.error("No se pudo crear ningún socket")
                 return
@@ -103,7 +129,7 @@ class Server(threading.Thread):
                 sockets_for_select = [s[1] for s in self.sockets]
                 try:
                     readable, _, _ = select.select(sockets_for_select, [], [], 2)
-                    
+
                     for sock in readable:
                         try:
                             client, addr = sock.accept()
@@ -130,7 +156,7 @@ class Server(threading.Thread):
     def cleanup(self) -> None:
         """Limpieza de recursos"""
         self.running = False
-        
+
         # Cerrar todos los sockets
         if hasattr(self, 'sockets'):
             for _, soc in self.sockets:
@@ -138,7 +164,7 @@ class Server(threading.Thread):
                     soc.close()
                 except Exception as e:
                     self.logger.error(f"Error cerrando socket: {e}")
-        
+
         # Limpiar conexiones
         with self.threadsLock:
             for conn in list(self.threads):
@@ -146,7 +172,7 @@ class Server(threading.Thread):
                     conn.close()
                 except Exception as e:
                     self.logger.error(f"Error cerrando conexión: {e}")
-        
+
         # Cerrar threadpool
         try:
             self.threadpool.shutdown(wait=True)
@@ -183,13 +209,13 @@ class ConnectionHandler:
         self.client_addr = f"{addr[0]}:{addr[1]}"
         self.log = f'Conexión desde {self.client_addr}'
         self.connection_time = time.time()
-        
+
     def close(self) -> None:
         """Cierra las conexiones de manera segura"""
         try:
             # Registrar desconexión en el log
             self.server.log_message(f"Cliente desconectado desde {self.client_addr}")
-            
+
             for sock in (self.client, self.target):
                 if sock:
                     try:
@@ -200,19 +226,18 @@ class ConnectionHandler:
         except Exception as e:
             self.server.log_message(f"Error al cerrar conexión de {self.client_addr}: {str(e)}")
 
-
     def run(self) -> None:
         try:
             if not self.handle_initial_connection():
                 return
 
             self.server.log_message(f"Buffer recibido de {self.client_addr}: {self.client_buffer.decode('utf-8', errors='ignore')}")
-            
+
             # Intentamos obtener el host de diferentes fuentes
             self.host_port = (
-                self.get_header('X-Real-Host') or 
-                self.get_connect_host() or 
-                self.get_header('Host') or 
+                self.get_header('X-Real-Host') or
+                self.get_connect_host() or
+                self.get_header('Host') or
                 config.DEFAULT_HOST
             )
 
@@ -220,7 +245,7 @@ class ConnectionHandler:
                 self.client.send(b'HTTP/1.1 400 NoXRealHost!\r\n\r\n')
                 return
 
-            if not self.authenticate_and_connect(self.host_port):
+            if not self.connect_and_tunnel(self.host_port):
                 return
 
         except Exception as e:
@@ -232,26 +257,74 @@ class ConnectionHandler:
     def handle_initial_connection(self) -> bool:
         """Maneja la conexión inicial y lee el buffer del cliente"""
         try:
+            # Increase timeout and add more logging
+            self.client.settimeout(10)  # 10 seconds timeout
+
+            # Receive full data
             data = self.client.recv(config.BUFLEN)
+
             if not data:
+                self.server.log_message(f"DEBUG: No data received from {self.client_addr}")
                 return False
+
+            # Extensive logging
+            self.server.log_message(f"DEBUG: Connection details:")
+            self.server.log_message(f"DEBUG: Client address: {self.client_addr}")
+            self.server.log_message(f"DEBUG: Received data length: {len(data)}")
+
+            try:
+                # Try to decode with full error information
+                decoded_data = data.decode('utf-8', errors='replace')
+                self.server.log_message(f"DEBUG: Raw data received (decoded): {repr(decoded_data)}")
+            except Exception as decode_error:
+                self.server.log_message(f"DEBUG: Error decoding data: {decode_error}")
+                # Log raw bytes if decoding fails
+                self.server.log_message(f"DEBUG: Raw data received (bytes): {data}")
+
             self.client_buffer = data
             return True
         except Exception as e:
-            self.server.log_message(f"Error en conexión inicial: {e}")
+            self.server.log_message(f"DEBUG: Critical error in initial connection: {e}")
             return False
+
+    def get_headers(self) -> dict:
+        """Obtiene los encabezados de la solicitud HTTP"""
+        headers = {}
+        try:
+            # Ultra-verbose logging
+            self.server.log_message("DEBUG: get_headers method called")
+
+            # Decode with more error information
+            raw_buffer = self.client_buffer.decode('utf-8', errors='replace')
+            self.server.log_message(f"DEBUG: Raw buffer content: {repr(raw_buffer)}")
+
+            # Split lines and remove empty lines
+            lines = [line.strip() for line in raw_buffer.replace('\r\n', '\n').split('\n') if line.strip()]
+
+            self.server.log_message(f"DEBUG: Parsed lines: {lines}")
+
+            # Skip the first line (request line)
+            for line in lines[1:]:
+                self.server.log_message(f"DEBUG: Processing line: {repr(line)}")
+                if ': ' in line:
+                    try:
+                        key, value = line.split(': ', 1)
+                        headers[key.strip()] = value.strip()
+                        self.server.log_message(f"DEBUG: Added header - {key.strip()}: {value.strip()}")
+                    except Exception as split_error:
+                        self.server.log_message(f"DEBUG: Error splitting header: {line}, Error: {split_error}")
+
+            self.server.log_message(f"DEBUG: Final parsed headers: {headers}")
+
+            return headers
+        except Exception as e:
+            self.server.log_message(f"DEBUG: Critical error parsing headers: {e}")
+            return {}
 
     def get_header(self, header: str) -> str:
         """Obtiene el valor de un header específico"""
-        try:
-            headers = self.client_buffer.decode('utf-8', errors='ignore')
-            for line in headers.split('\r\n'):
-                if line.lower().startswith(f'{header.lower()}:'):
-                    return line.split(':', 1)[1].strip()
-            return ''
-        except Exception as e:
-            self.server.log_message(f"Error parsing header {header}: {e}")
-            return ''
+        headers = self.get_headers()
+        return headers.get(header, '')
 
     def get_connect_host(self) -> str:
         """Obtiene el host del método CONNECT"""
@@ -266,15 +339,10 @@ class ConnectionHandler:
         except Exception:
             return ''
 
-    def authenticate_and_connect(self, host_port: str) -> bool:
-        """Autentica la conexión y establece el túnel"""
+    def connect_and_tunnel(self, host_port: str) -> bool:
+        """Establece la conexión y el túnel"""
         try:
             host_port = host_port.split()[0]
-            
-            if config.PASS:
-                if self.get_header('X-Pass') != config.PASS:
-                    self.client.send(b'HTTP/1.1 400 WrongPass!\r\n\r\n')
-                    return False
 
             self.connect_target(host_port)
             self.client.sendall(config.RESPONSE.encode())
@@ -324,7 +392,7 @@ class ConnectionHandler:
                         if not data:
                             self.server.log_message(f"Conexión cerrada por {'cliente' if sock is self.client else 'destino'} {self.client_addr}")
                             return
-                        
+
                         if sock is self.target:
                             self.client.sendall(data)
                         else:
@@ -343,14 +411,31 @@ class ConnectionHandler:
 def main() -> None:
     """Función principal que inicia el servidor proxy"""
     try:
-        ports = [int(port) for port in sys.argv[1:]] or [config.PORT]
+        # Generar certificados SSL si no existen
+        generate_ssl_certificates()
+
+        # Parsear los argumentos de la línea de comandos
+        port_configs: List[Tuple[int, bool]] = []
+
+        for arg in sys.argv[1:]:
+            if ':' in arg:
+                port, ssl_config = arg.split(':')
+                port = int(port)
+                use_ssl = ssl_config.split('=')[1].lower() == 'true'
+                port_configs.append((port, use_ssl))
+            else:
+                port_configs.append((int(arg), False))
+
+        if not port_configs:
+            port_configs = [(config.PORT, False), (config.SSL_PORT, True)]
+
         servers: List[Server] = []
 
-        for port in ports:
-            server = Server(config.IP, port)
+        for port, use_ssl in port_configs:
+            server = Server(config.IP, port, use_ssl)
             server.start()
             servers.append(server)
-            logging.info(f"Servidor proxy iniciado en {config.IP}:{port}")
+            logging.info(f"Servidor proxy iniciado en {config.IP}:{port} {'con SSL' if use_ssl else ''}")
 
         while True:
             time.sleep(1)
