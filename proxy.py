@@ -9,8 +9,10 @@ import os
 import logging
 import ssl
 import subprocess
+import base64
+import argparse
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Set, Optional, Tuple
+from typing import List, Set, Optional, Tuple, Dict
 from dataclasses import dataclass
 
 active_connections = {}
@@ -55,12 +57,14 @@ def generate_ssl_certificates():
         logging.info("Certificados SSL generados.")
 
 class Server(threading.Thread):
-    def __init__(self, host: str, port: int, use_ssl: bool = False):
+    def __init__(self, host: str, port: int, use_ssl: bool = False, username: Optional[str] = None, password: Optional[str] = None):
         super().__init__()
         self.running: bool = False
         self.host: str = host
         self.port: int = port
         self.use_ssl: bool = use_ssl
+        self.username: Optional[str] = username
+        self.password: Optional[str] = password
         self.threads: Set = set()
         self.threadsLock: threading.Lock = threading.Lock()
         self.logLock: threading.Lock = threading.Lock()
@@ -180,7 +184,7 @@ class Server(threading.Thread):
             self.logger.error(f"Error cerrando threadpool: {e}")
 
     def handle_connection(self, client: socket.socket, addr: tuple) -> None:
-        conn = ConnectionHandler(client, self, addr)
+        conn = ConnectionHandler(client, self, addr, self.username, self.password)
         self.add_conn(conn)
         try:
             conn.run()
@@ -201,7 +205,7 @@ class Server(threading.Thread):
             self.logger.info(message)
 
 class ConnectionHandler:
-    def __init__(self, client_socket: socket.socket, server: Server, addr: tuple):
+    def __init__(self, client_socket: socket.socket, server: Server, addr: tuple, username: Optional[str], password: Optional[str]):
         self.client = client_socket
         self.server = server
         self.client_buffer = bytearray()
@@ -209,6 +213,8 @@ class ConnectionHandler:
         self.client_addr = f"{addr[0]}:{addr[1]}"
         self.log = f'Conexión desde {self.client_addr}'
         self.connection_time = time.time()
+        self.username = username
+        self.password = password
 
     def close(self) -> None:
         """Cierra las conexiones de manera segura"""
@@ -232,6 +238,13 @@ class ConnectionHandler:
                 return
 
             self.server.log_message(f"Buffer recibido de {self.client_addr}: {self.client_buffer.decode('utf-8', errors='ignore')}")
+
+            # Verificar autenticación básica si se proporcionaron credenciales
+            if self.username and self.password:
+                auth_header = self.get_header('Authorization')
+                if not auth_header or not self.check_auth(auth_header):
+                    self.client.send(b'HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Access to the staging site"\r\n\r\n')
+                    return
 
             # Intentamos obtener el host de diferentes fuentes
             self.host_port = (
@@ -408,37 +421,67 @@ class ConnectionHandler:
         finally:
             self.close()
 
+    def check_auth(self, auth_header):
+        try:
+            auth_type, auth_string = auth_header.split()
+            if auth_type.lower() == 'basic':
+                auth_string = base64.b64decode(auth_string).decode('utf-8')
+                username, password = auth_string.split(':')
+                return username == self.username and password == self.password
+        except Exception:
+            return False
+        return False
+
 def main() -> None:
     """Función principal que inicia el servidor proxy"""
+    parser = argparse.ArgumentParser(description='Inicia el servidor proxy con múltiples puertos y configuraciones de SSL opcionales.')
+    parser.add_argument('ports', metavar='PORT', type=str, nargs='+', help='Lista de configuraciones de puertos en el formato PORT[:SSL][:USER:PASS]. Ejemplo: 8080 8443:ssl 9090:admin:secret')
+
+    args = parser.parse_args()
+
+    port_configs: List[Dict[str, Optional[str]]] = []
+
+    for port_config in args.ports:
+        parts = port_config.split(':')
+        port = int(parts[0])
+        use_ssl = 'ssl' in parts
+        username = None
+        password = None
+
+        if len(parts) > 1:
+            if parts[1] == 'ssl':
+                use_ssl = True
+                if len(parts) > 2:
+                    username = parts[2]
+                    if len(parts) > 3:
+                        password = parts[3]
+            else:
+                username = parts[1]
+                if len(parts) > 2:
+                    password = parts[2]
+
+        port_configs.append({
+            'port': port,
+            'use_ssl': use_ssl,
+            'username': username,
+            'password': password
+        })
+
     try:
         # Generar certificados SSL si no existen
         generate_ssl_certificates()
 
-        # Parsear los argumentos de la línea de comandos
-        port_configs: List[Tuple[int, bool]] = []
-
-        for arg in sys.argv[1:]:
-            if ':' in arg:
-                port, ssl_config = arg.split(':')
-                port = int(port)
-                use_ssl = ssl_config.split('=')[1].lower() == 'true'
-                port_configs.append((port, use_ssl))
-            else:
-                port_configs.append((int(arg), False))
-
-        if not port_configs:
-            port_configs = [(config.PORT, False), (config.SSL_PORT, True)]
-
+        # Iniciar los servidores
         servers: List[Server] = []
-
-        for port, use_ssl in port_configs:
-            server = Server(config.IP, port, use_ssl)
+        for port_config in port_configs:
+            server = Server(config.IP, port_config['port'], port_config['use_ssl'], port_config['username'], port_config['password'])
             server.start()
             servers.append(server)
-            logging.info(f"Servidor proxy iniciado en {config.IP}:{port} {'con SSL' if use_ssl else ''}")
+            logging.info(f"Servidor proxy iniciado en {config.IP}:{port_config['port']} {'con SSL' if port_config['use_ssl'] else ''}")
 
-        while True:
-            time.sleep(1)
+        # Wait for servers to finish (keeps main thread running)
+        for server in servers:
+            server.join()
     except KeyboardInterrupt:
         logging.info('Deteniendo servidores...')
         for server in servers:
