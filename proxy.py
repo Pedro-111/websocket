@@ -40,6 +40,7 @@ class Config:
     CERTFILE: str = 'cert.pem'
     KEYFILE: str = 'key.pem'
     ACL: List[str] = None  # Lista de control de acceso
+    BLOCKED_PAGES: List[str] = None  # Lista de páginas bloqueadas
 
     @property
     def RESPONSE(self) -> str:
@@ -50,17 +51,8 @@ config_parser = configparser.ConfigParser()
 config_parser.read('config.ini')
 
 config = Config(
-    IP=config_parser.get('Settings', 'IP', fallback='0.0.0.0'),
-    BUFLEN=config_parser.getint('Settings', 'BUFLEN', fallback=8196 * 8),
-    TIMEOUT=config_parser.getint('Settings', 'TIMEOUT', fallback=60),
-    MSG=config_parser.get('Settings', 'MSG', fallback='WSS'),
-    COR=config_parser.get('Settings', 'COR', fallback='<font color="null">'),
-    FTAG=config_parser.get('Settings', 'FTAG', fallback='</font>'),
-    DEFAULT_HOST=config_parser.get('Settings', 'DEFAULT_HOST', fallback='0.0.0.0:22'),
-    MAX_WORKERS=config_parser.getint('Settings', 'MAX_WORKERS', fallback=100),
-    CERTFILE=config_parser.get('Settings', 'CERTFILE', fallback='cert.pem'),
-    KEYFILE=config_parser.get('Settings', 'KEYFILE', fallback='key.pem'),
-    ACL=config_parser.get('Settings', 'ACL', fallback=None).split(',') if config_parser.has_option('Settings', 'ACL') else None
+    ACL=config_parser.get('ACL', 'pages', fallback=None).split(',') if config_parser.has_option('ACL', 'pages') else None,
+    BLOCKED_PAGES=config_parser.get('BlockedPages', 'pages', fallback=None).split(',') if config_parser.has_option('BlockedPages', 'pages') else None
 )
 
 def generate_ssl_certificates():
@@ -273,6 +265,13 @@ class ConnectionHandler:
             if config.ACL and self.client_addr.split(':')[0] not in config.ACL:
                 self.client.send(b'HTTP/1.1 403 Forbidden\r\n\r\n')
                 self.server.log_message(f"Conexión denegada desde {self.client_addr} (no en ACL)")
+                return
+
+            # Verificar páginas bloqueadas
+            host = self.get_header('Host')
+            if config.BLOCKED_PAGES and any(blocked in host for blocked in config.BLOCKED_PAGES):
+                self.client.send(b'HTTP/1.1 403 Forbidden\r\n\r\n')
+                self.server.log_message(f"Conexión denegada desde {self.client_addr} (página bloqueada: {host})")
                 return
 
             # Intentamos obtener el host de diferentes fuentes
