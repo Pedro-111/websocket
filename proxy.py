@@ -14,6 +14,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Set, Optional, Tuple, Dict
 from dataclasses import dataclass
+import configparser
 
 active_connections = {}
 connections_lock = threading.Lock()
@@ -38,23 +39,43 @@ class Config:
     MAX_WORKERS: int = 100
     CERTFILE: str = 'cert.pem'
     KEYFILE: str = 'key.pem'
+    ACL: List[str] = None  # Lista de control de acceso
 
     @property
     def RESPONSE(self) -> str:
         return f"HTTP/1.1 200 {self.COR}{self.MSG}{self.FTAG}\r\n\r\n"
 
-config = Config()
+# Cargar configuración desde un archivo
+config_parser = configparser.ConfigParser()
+config_parser.read('config.ini')
+
+config = Config(
+    IP=config_parser.get('Settings', 'IP', fallback='0.0.0.0'),
+    BUFLEN=config_parser.getint('Settings', 'BUFLEN', fallback=8196 * 8),
+    TIMEOUT=config_parser.getint('Settings', 'TIMEOUT', fallback=60),
+    MSG=config_parser.get('Settings', 'MSG', fallback='WSS'),
+    COR=config_parser.get('Settings', 'COR', fallback='<font color="null">'),
+    FTAG=config_parser.get('Settings', 'FTAG', fallback='</font>'),
+    DEFAULT_HOST=config_parser.get('Settings', 'DEFAULT_HOST', fallback='0.0.0.0:22'),
+    MAX_WORKERS=config_parser.getint('Settings', 'MAX_WORKERS', fallback=100),
+    CERTFILE=config_parser.get('Settings', 'CERTFILE', fallback='cert.pem'),
+    KEYFILE=config_parser.get('Settings', 'KEYFILE', fallback='key.pem'),
+    ACL=config_parser.get('Settings', 'ACL', fallback=None).split(',') if config_parser.has_option('Settings', 'ACL') else None
+)
 
 def generate_ssl_certificates():
     """Genera certificados SSL si no existen"""
     if not os.path.exists(config.CERTFILE) or not os.path.exists(config.KEYFILE):
         logging.info("Generando certificados SSL...")
-        subprocess.run([
-            'openssl', 'req', '-x509', '-newkey', 'rsa:4096',
-            '-keyout', config.KEYFILE, '-out', config.CERTFILE,
-            '-days', '365', '-nodes', '-subj', '/CN=localhost'
-        ], check=True)
-        logging.info("Certificados SSL generados.")
+        try:
+            subprocess.run([
+                'openssl', 'req', '-x509', '-newkey', 'rsa:4096',
+                '-keyout', config.KEYFILE, '-out', config.CERTFILE,
+                '-days', '365', '-nodes', '-subj', '/CN=localhost'
+            ], check=True)
+            logging.info("Certificados SSL generados.")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Error generando certificados SSL: {e}")
 
 class Server(threading.Thread):
     def __init__(self, host: str, port: int, use_ssl: bool = False, username: Optional[str] = None, password: Optional[str] = None):
@@ -184,10 +205,12 @@ class Server(threading.Thread):
             self.logger.error(f"Error cerrando threadpool: {e}")
 
     def handle_connection(self, client: socket.socket, addr: tuple) -> None:
-        conn = ConnectionHandler(client, self, addr, self.username, self.password)
-        self.add_conn(conn)
         try:
+            conn = ConnectionHandler(client, self, addr, self.username, self.password)
+            self.add_conn(conn)
             conn.run()
+        except Exception as e:
+            self.log_message(f"Error handling connection from {addr}: {e}")
         finally:
             self.remove_conn(conn)
 
@@ -246,6 +269,12 @@ class ConnectionHandler:
                     self.client.send(b'HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Access to the staging site"\r\n\r\n')
                     return
 
+            # Verificar ACL
+            if config.ACL and self.client_addr.split(':')[0] not in config.ACL:
+                self.client.send(b'HTTP/1.1 403 Forbidden\r\n\r\n')
+                self.server.log_message(f"Conexión denegada desde {self.client_addr} (no en ACL)")
+                return
+
             # Intentamos obtener el host de diferentes fuentes
             self.host_port = (
                 self.get_header('X-Real-Host') or
@@ -270,68 +299,32 @@ class ConnectionHandler:
     def handle_initial_connection(self) -> bool:
         """Maneja la conexión inicial y lee el buffer del cliente"""
         try:
-            # Increase timeout and add more logging
             self.client.settimeout(10)  # 10 seconds timeout
-
-            # Receive full data
             data = self.client.recv(config.BUFLEN)
 
             if not data:
-                self.server.log_message(f"DEBUG: No data received from {self.client_addr}")
+                self.server.log_message(f"No data received from {self.client_addr}")
                 return False
-
-            # Extensive logging
-            self.server.log_message(f"DEBUG: Connection details:")
-            self.server.log_message(f"DEBUG: Client address: {self.client_addr}")
-            self.server.log_message(f"DEBUG: Received data length: {len(data)}")
-
-            try:
-                # Try to decode with full error information
-                decoded_data = data.decode('utf-8', errors='replace')
-                self.server.log_message(f"DEBUG: Raw data received (decoded): {repr(decoded_data)}")
-            except Exception as decode_error:
-                self.server.log_message(f"DEBUG: Error decoding data: {decode_error}")
-                # Log raw bytes if decoding fails
-                self.server.log_message(f"DEBUG: Raw data received (bytes): {data}")
 
             self.client_buffer = data
             return True
         except Exception as e:
-            self.server.log_message(f"DEBUG: Critical error in initial connection: {e}")
+            self.server.log_message(f"Error in initial connection: {e}")
             return False
 
     def get_headers(self) -> dict:
         """Obtiene los encabezados de la solicitud HTTP"""
         headers = {}
         try:
-            # Ultra-verbose logging
-            self.server.log_message("DEBUG: get_headers method called")
-
-            # Decode with more error information
             raw_buffer = self.client_buffer.decode('utf-8', errors='replace')
-            self.server.log_message(f"DEBUG: Raw buffer content: {repr(raw_buffer)}")
-
-            # Split lines and remove empty lines
             lines = [line.strip() for line in raw_buffer.replace('\r\n', '\n').split('\n') if line.strip()]
-
-            self.server.log_message(f"DEBUG: Parsed lines: {lines}")
-
-            # Skip the first line (request line)
             for line in lines[1:]:
-                self.server.log_message(f"DEBUG: Processing line: {repr(line)}")
                 if ': ' in line:
-                    try:
-                        key, value = line.split(': ', 1)
-                        headers[key.strip()] = value.strip()
-                        self.server.log_message(f"DEBUG: Added header - {key.strip()}: {value.strip()}")
-                    except Exception as split_error:
-                        self.server.log_message(f"DEBUG: Error splitting header: {line}, Error: {split_error}")
-
-            self.server.log_message(f"DEBUG: Final parsed headers: {headers}")
-
+                    key, value = line.split(': ', 1)
+                    headers[key.strip()] = value.strip()
             return headers
         except Exception as e:
-            self.server.log_message(f"DEBUG: Critical error parsing headers: {e}")
+            self.server.log_message(f"Error parsing headers: {e}")
             return {}
 
     def get_header(self, header: str) -> str:
@@ -356,7 +349,6 @@ class ConnectionHandler:
         """Establece la conexión y el túnel"""
         try:
             host_port = host_port.split()[0]
-
             self.connect_target(host_port)
             self.client.sendall(config.RESPONSE.encode())
             self.server.log_message(self.log + f' - CONNECT {host_port}')
