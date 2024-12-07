@@ -13,7 +13,7 @@ run_as_root() {
 INSTALL_DIR="$HOME/.local/bin"
 SCRIPT_NAME="manage_proxy.sh"
 PROXY_SCRIPT="proxy.py"
-GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/ubuntu-debian"
+GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/feature/http2-auth"
 run_as_root touch "/var/tmp/proxy.log"
 run_as_root chmod 666 "/var/tmp/proxy.log"
 # Función para instalar dependencias
