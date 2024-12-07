@@ -11,7 +11,7 @@ NC='\033[0m' # No Color
 PROXY_PATH="/usr/local/bin/proxy.py"
 SERVICE_NAME="websocket-proxy"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/ubuntu-debian/proxy.py"
+GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/websocket/feature/http2-auth/proxy.py"
 LOG_FILE="/tmp/proxy.log"
 BACKUP_DIR="/var/backups/websocket-proxy"
 
