@@ -25,7 +25,7 @@ sudo apt-get install python3
 1. Instalar y configurar el script:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Pedro-111/websocket/ubuntu-debian/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Pedro-111/websocket/feature/http2-auth/install.sh | sudo bash
 ```
 
 2. Ejecuta el script de instalación:
