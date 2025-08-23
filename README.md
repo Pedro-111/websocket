@@ -25,7 +25,7 @@ sudo apt-get install python3
 1. Instalar y configurar el script:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Pedro-111/websocket/feature/http2-auth/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/Pedro-111/websocket/feature/http2-auth/install.sh | bash
 ```
 
 2. Ejecuta el script de instalación:
